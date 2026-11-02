@@ -1,0 +1,25 @@
+<div class="min-h-screen bg-slate-50 p-10 font-sans">
+  <header class="fixed top-0 inset-x-0 h-14 bg-white/80 backdrop-blur border-b border-slate-200 flex items-center px-6">
+    <span class="font-bold text-lg">Fixed header</span>
+  </header>
+  <div class="mt-16 max-w-3xl mx-auto space-y-6">
+    <div class="rounded-2xl p-8 text-white" style="background: radial-gradient(circle at top left, oklch(0.7 0.2 300), #1e1b4b)">
+      <h2 class="text-3xl font-semibold">Radial + oklch</h2>
+      <p class="opacity-80 mt-2">Line one<br>Line two after br</p>
+    </div>
+    <div class="relative h-40 rounded-xl border-2 border-dashed border-slate-300 bg-white">
+      <span class="absolute right-4 bottom-4 rounded-full bg-emerald-100 text-emerald-700 text-xs px-2 py-1">absolute badge</span>
+      <div style="display:contents"><p class="p-4 text-slate-500">Inside display: contents with <code class="bg-slate-100 px-1 rounded">code</code> and <a class="underline text-indigo-600">a link</a>.</p></div>
+    </div>
+    <form class="grid gap-3 bg-white p-6 rounded-xl shadow-lg">
+      <label class="flex items-center gap-2"><input type="checkbox" checked> Remember me</label>
+      <textarea class="border rounded p-2" rows="3">Multi
+line value</textarea>
+      <select class="border rounded p-2"><option>Option A</option></select>
+    </form>
+    <pre class="bg-slate-900 text-slate-100 p-4 rounded-lg text-sm">const x = 1;
+  indented()</pre>
+    <table class="w-full text-left"><tr><th class="p-2">Name</th><th class="p-2">Value</th></tr><tr><td class="p-2">Alpha</td><td class="p-2 line-through">12</td></tr></table>
+    <ul class="list-disc pl-6"><li>First item</li><li>Second <strong>bold</strong> item</li></ul>
+  </div>
+</div>

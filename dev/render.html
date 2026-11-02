@@ -1,0 +1,235 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>render</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  .n { position: absolute; box-sizing: border-box; }
+  .layer { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+  svg.paint { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; overflow: hidden; }
+</style>
+<script>
+// Draws the plugin's layer tree back as HTML, following Figma semantics as closely
+// as CSS allows (auto layout → flex, inside strokes → overlay, Figma gradient
+// transforms → SVG gradients in bounding-box space, text auto-resize modes).
+// It never reads the original page: any difference with the original screenshot
+// comes from what the plugin extracted (or from this emulation's approximations).
+let gid = 0;
+const rgba = (c, a = 1) => `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${(c.a == null ? 1 : c.a) * a})`;
+
+function invert(m) {
+  const [[a, b, c], [d, e, f]] = m;
+  const det = a * e - b * d;
+  return [[e / det, -b / det, (b * f - c * e) / det], [-d / det, a / det, (c * d - a * f) / det]];
+}
+
+function paintLayer(p, images) {
+  if (p.type === 'SOLID') {
+    const d = document.createElement('div');
+    d.className = 'layer';
+    d.style.background = rgba(p.color, p.opacity == null ? 1 : p.opacity);
+    return d;
+  }
+  if (p.type === 'IMAGE') {
+    const d = document.createElement('div');
+    d.className = 'layer';
+    const src = images[p.ref];
+    if (src) {
+      d.style.backgroundImage = `url("${src}")`;
+      d.style.backgroundSize = p.scaleMode === 'FIT' ? 'contain' : 'cover';
+      d.style.backgroundPosition = 'center';
+      d.style.backgroundRepeat = 'no-repeat';
+    } else d.style.background = '#dbdbe0';
+    return d;
+  }
+  if (/^GRADIENT_/.test(p.type)) {
+    const id = 'g' + (++gid);
+    const inv = invert(p.gradientTransform);
+    const mat = `matrix(${inv[0][0]} ${inv[1][0]} ${inv[0][1]} ${inv[1][1]} ${inv[0][2]} ${inv[1][2]})`;
+    const stops = p.gradientStops.map((s) => `<stop offset="${s.position}" stop-color="${rgba({ ...s.color, a: 1 })}" stop-opacity="${s.color.a}"/>`).join('');
+    let def;
+    if (p.type === 'GRADIENT_LINEAR') def = `<linearGradient id="${id}" gradientUnits="objectBoundingBox" x1="0" y1="0.5" x2="1" y2="0.5" gradientTransform="${mat}">${stops}</linearGradient>`;
+    else def = `<radialGradient id="${id}" gradientUnits="objectBoundingBox" cx="0.5" cy="0.5" r="0.5" gradientTransform="${mat}">${stops}</radialGradient>`;
+    const wrap = document.createElement('div');
+    wrap.className = 'layer';
+    wrap.style.overflow = 'hidden';
+    wrap.innerHTML = `<svg class="paint" preserveAspectRatio="none" viewBox="0 0 1 1"><defs>${def}</defs><rect width="1" height="1" fill="url(#${id})"/></svg>`;
+    return wrap;
+  }
+  return null;
+}
+
+function cssPaint(p) {
+  if (!p) return 'transparent';
+  if (p.type === 'SOLID') return rgba(p.color, p.opacity == null ? 1 : p.opacity);
+  if (p.gradientStops) return rgba(p.gradientStops[0].color);
+  return '#000';
+}
+
+function shadows(effects) {
+  const out = [];
+  let filter = '', backdrop = '';
+  for (const e of effects || []) {
+    if (e.type === 'DROP_SHADOW') out.push(`${e.offset.x}px ${e.offset.y}px ${e.radius}px ${e.spread || 0}px ${rgba(e.color)}`);
+    if (e.type === 'INNER_SHADOW') out.push(`inset ${e.offset.x}px ${e.offset.y}px ${e.radius}px ${e.spread || 0}px ${rgba(e.color)}`);
+    if (e.type === 'LAYER_BLUR') filter = `blur(${e.radius / 2}px)`;
+    if (e.type === 'BACKGROUND_BLUR') backdrop = `blur(${e.radius / 2}px)`;
+  }
+  return { boxShadow: out.join(', '), filter, backdrop };
+}
+
+function textGradientCss(p) {
+  // Approximation for gradient text: direction from the transform, stops as-is.
+  const inv = invert(p.gradientTransform);
+  const sx = inv[0][1] * 0.5 + inv[0][2], sy = inv[1][1] * 0.5 + inv[1][2];
+  const ex = inv[0][0] + sx, ey = inv[1][0] + sy;
+  const ang = Math.atan2(ex - sx, -(ey - sy)) * 180 / Math.PI;
+  return `linear-gradient(${ang}deg, ${p.gradientStops.map((s) => `${rgba(s.color)} ${s.position * 100}%`).join(', ')})`;
+}
+
+function build(n, parent, images) {
+  const el = document.createElement('div');
+  el.className = 'n';
+  el.dataset.type = n.type;
+  if (n.name) el.dataset.name = n.name;
+  const inLayout = parent && parent.layout && !n.absolute;
+  if (inLayout) {
+    el.style.position = 'relative';
+    el.style.flex = 'none';
+    if (n.stretch) el.style.alignSelf = 'stretch';
+  } else {
+    el.style.left = n.x + 'px';
+    el.style.top = n.y + 'px';
+  }
+  if (typeof n.opacity === 'number') el.style.opacity = n.opacity;
+
+  if (n.type === 'TEXT') {
+    el.style.whiteSpace = n.autoResize === 'WIDTH_AND_HEIGHT' ? 'pre' : 'pre-wrap';
+    el.style.overflowWrap = 'break-word';
+    if (n.autoResize !== 'WIDTH_AND_HEIGHT') {
+      const horizontalParent = inLayout && parent.layout.mode === 'HORIZONTAL';
+      if (!(n.stretch && inLayout && parent.layout.mode === 'VERTICAL')) el.style.width = n.w + 'px';
+      if (n.stretch && horizontalParent) el.style.height = 'auto';
+    }
+    el.style.textAlign = { LEFT: 'left', CENTER: 'center', RIGHT: 'right', JUSTIFIED: 'justify' }[n.align] || 'left';
+    for (const s of n.segments) {
+      const span = document.createElement('span');
+      span.textContent = s.text;
+      span.style.fontFamily = s.font.families.map((f) => (/^[\w-]+$/.test(f) && /^(serif|sans-serif|monospace|system-ui|cursive|fantasy|ui-\w+|-apple-system)$/.test(f) ? f : `"${f}"`)).join(', ');
+      span.style.fontWeight = s.font.weight;
+      span.style.fontStyle = s.font.italic ? 'italic' : 'normal';
+      span.style.fontSize = s.size + 'px';
+      span.style.lineHeight = s.lineHeight ? s.lineHeight + 'px' : 'normal';
+      span.style.letterSpacing = (s.letterSpacing || 0) + 'px';
+      if (s.textCase) span.style.textTransform = { UPPER: 'uppercase', LOWER: 'lowercase', TITLE: 'capitalize' }[s.textCase];
+      if (s.decoration) span.style.textDecoration = s.decoration === 'UNDERLINE' ? 'underline' : 'line-through';
+      if (s.fill && /^GRADIENT/.test(s.fill.type)) {
+        span.style.backgroundImage = textGradientCss(s.fill);
+        span.style.webkitBackgroundClip = 'text';
+        span.style.backgroundClip = 'text';
+        span.style.color = 'transparent';
+      } else span.style.color = cssPaint(s.fill);
+      el.appendChild(span);
+    }
+    // A block-level line box: the strut uses the first segment's metrics, like Figma.
+    const s0 = n.segments[0];
+    el.style.fontSize = s0.size + 'px';
+    el.style.lineHeight = s0.lineHeight ? s0.lineHeight + 'px' : 'normal';
+    el.style.fontFamily = el.firstChild.style.fontFamily;
+    parent ? parent.el.appendChild(el) : document.body.appendChild(el);
+    return;
+  }
+
+  if (n.type === 'SVG') {
+    el.style.width = n.w + 'px';
+    el.style.height = n.h + 'px';
+    el.innerHTML = n.svg;
+    const svg = el.firstElementChild;
+    if (svg) { svg.style.display = 'block'; svg.setAttribute('width', n.w); svg.setAttribute('height', n.h); }
+    parent ? parent.el.appendChild(el) : document.body.appendChild(el);
+    return;
+  }
+
+  // FRAME / RECT
+  el.style.width = n.w + 'px';
+  el.style.height = n.h + 'px';
+  if (n.radii) el.style.borderRadius = `${n.radii.tl}px ${n.radii.tr}px ${n.radii.br}px ${n.radii.bl}px`;
+  const fx = shadows(n.effects);
+  if (fx.boxShadow) el.style.boxShadow = fx.boxShadow;
+  if (fx.filter) el.style.filter = fx.filter;
+  if (fx.backdrop) el.style.backdropFilter = fx.backdrop;
+  if (n.clip) el.style.overflow = 'hidden';
+  for (const p of n.fills || []) {
+    const l = paintLayer(p, images);
+    if (l) el.appendChild(l);
+  }
+  if (n.stroke) {
+    const s = document.createElement('div');
+    s.className = 'layer';
+    s.style.boxSizing = 'border-box';
+    const w = n.stroke.weights;
+    s.style.borderStyle = n.stroke.dash ? (n.stroke.dash[0] === n.stroke.dash[1] ? 'dotted' : 'dashed') : 'solid';
+    s.style.borderColor = cssPaint(n.stroke.paint);
+    s.style.borderWidth = `${w.t}px ${w.r}px ${w.b}px ${w.l}px`;
+    s.style.zIndex = 1;
+    el.appendChild(s);
+  }
+  const l = n.layout;
+  if (l) {
+    el.style.display = 'flex';
+    el.style.flexDirection = l.mode === 'HORIZONTAL' ? 'row' : 'column';
+    el.style.padding = `${l.pt}px ${l.pr}px ${l.pb}px ${l.pl}px`;
+    el.style.gap = l.spacing + 'px';
+    el.style.justifyContent = { MIN: 'flex-start', MAX: 'flex-end', CENTER: 'center', SPACE_BETWEEN: 'space-between' }[l.primaryAlign];
+    el.style.alignItems = { MIN: 'flex-start', MAX: 'flex-end', CENTER: 'center', BASELINE: 'baseline' }[l.counterAlign];
+    if (l.primarySizing === 'AUTO') {
+      if (l.mode === 'VERTICAL') el.style.height = 'auto';
+      else el.style.width = 'auto';
+    }
+  }
+  if (n.stretch && inLayout) {
+    if (parent.layout.mode === 'VERTICAL') el.style.width = 'auto';
+    else el.style.height = 'auto';
+  }
+  parent ? parent.el.appendChild(el) : document.body.appendChild(el);
+  const self = { el, layout: l };
+  for (const c of n.children || []) build(c, self, images);
+}
+
+window.renderTree = async (json) => {
+  const doc = typeof json === 'string' ? JSON.parse(json) : json;
+  const images = {};
+  for (const im of doc.images || []) {
+    if (im.bytes) {
+      const bin = atob(im.bytes);
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      images[im.ref] = URL.createObjectURL(new Blob([u8]));
+    } else if (im.url) images[im.ref] = im.url;
+  }
+  document.body.innerHTML = '';
+  // Figma ships every Google Font, so load the families the tree asks for.
+  const fams = new Set();
+  (function walk(n) {
+    if (n.segments) for (const s of n.segments) for (const f of s.font.families) fams.add(f);
+    (n.children || []).forEach(walk);
+  })(doc.root);
+  const generic = /^(serif|sans-serif|monospace|system-ui|cursive|fantasy|ui-[\w-]+|-apple-system|blinkmacsystemfont|segoe ui|arial|helvetica|helvetica neue|times new roman|georgia|menlo|monaco|consolas|courier new|apple color emoji|segoe ui emoji|noto color emoji)$/i;
+  const links = [...fams].filter((f) => !generic.test(f)).map((f) => new Promise((r) => {
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(f)}:ital,wght@0,100..900;1,100..900&display=block`;
+    l.onload = l.onerror = r;
+    document.head.appendChild(l);
+  }));
+  await Promise.race([Promise.all(links), new Promise((r) => setTimeout(r, 5000))]);
+  build(doc.root, null, images);
+  await document.fonts.ready;
+  await Promise.all([...document.querySelectorAll('.layer')].map((d) => {
+    const m = /url\("(.+)"\)/.exec(d.style.backgroundImage);
+    if (!m) return null;
+    return new Promise((r) => { const i = new Image(); i.onload = i.onerror = r; i.src = m[1]; });
+  }));
+  const root = document.body.firstElementChild;
+  return { w: root.offsetWidth, h: root.offsetHeight };
+};
+</script>
