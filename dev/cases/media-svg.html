@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Media — inline SVG</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --brand: #7c3aed; --accent: #f97316; --track: #e5e7eb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: #111827; background: #fff; }
+  section { padding: 32px 48px; border-bottom: 1px solid #f1f5f9; }
+  h2 { margin: 0 0 16px; font-size: 18px; }
+  .row { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; background: #f5f3ff; color: var(--brand); font-weight: 600; font-size: 14px; }
+  .chip svg { width: 20px; height: 20px; }
+  .text-green { color: #16a34a; } .text-red { color: #dc2626; } .text-slate { color: #475569; }
+  .icon-lg { width: 48px; height: 48px; }
+  .filled path { fill: var(--accent); }
+  .filled .secondary { fill: var(--brand); opacity: .4; }
+  .star { width: 28px; height: 28px; color: #f59e0b; }
+  .star.off { color: #d1d5db; }
+  /* progress ring: dash offset and rotation set from CSS */
+  .ring { width: 120px; height: 120px; }
+  .ring .track { stroke: var(--track); }
+  .ring .bar { stroke: var(--brand); stroke-dasharray: 314.16; stroke-dashoffset: 94.25; transform: rotate(-90deg); transform-origin: 60px 60px; stroke-linecap: round; }
+  .ring-label { font-size: 22px; font-weight: 700; fill: #111827; text-anchor: middle; dominant-baseline: middle; font-family: Inter, sans-serif; }
+  /* chart with CSS-styled svg text */
+  .chart { width: 520px; height: 220px; }
+  .chart .axis { font-size: 11px; fill: #6b7280; font-family: Inter, sans-serif; }
+  .chart .title { font-size: 14px; font-weight: 700; fill: #111827; font-family: Inter, sans-serif; }
+  .chart .end { text-anchor: end; }
+  .chart .grid { stroke: #f3f4f6; }
+  .chart .line { fill: none; stroke: var(--brand); stroke-width: 3; }
+  .chart .area { fill: url(#areaGrad); }
+  .wave { display: block; width: 100%; height: 80px; }
+  .rotated { width: 40px; height: 40px; transform: rotate(45deg); color: #0ea5e9; }
+  .flip { width: 40px; height: 40px; transform: scaleX(-1); color: #0ea5e9; }
+</style>
+</head>
+<body>
+  <!-- sprite sheet + shared defs, like many icon systems / design systems ship -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+    <defs>
+      <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#ec4899"/></linearGradient>
+    </defs>
+    <symbol id="i-star" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+  </svg>
+
+  <section>
+    <h2>Heroicons / Lucide with currentColor</h2>
+    <div class="row">
+      <span class="chip"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.306 4.306a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"/></svg>Growth</span>
+      <span class="chip text-green"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Done</span>
+      <span class="text-red"><svg class="icon-lg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/></svg></span>
+      <svg class="icon-lg filled" viewBox="0 0 24 24"><path class="secondary" d="M4 4h16v16H4z"/><path d="M12 6l6 12H6z"/></svg>
+      <svg class="icon-lg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="url(#brandGrad)"/><path d="M7 12h10" stroke="#fff" stroke-width="2"/></svg>
+      <span class="text-slate" style="font-size:32px"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 24 24" height="1em" width="1em"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+      <svg class="rotated" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8H8z"/><rect x="10" y="10" width="4" height="12"/></svg>
+      <svg class="flip" viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l10-8v16z"/></svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sprite sheet &lt;use href&gt;</h2>
+    <div class="row">
+      <svg class="star"><use href="#i-star"/></svg>
+      <svg class="star"><use href="#i-star"/></svg>
+      <svg class="star"><use href="#i-star"/></svg>
+      <svg class="star off"><use href="#i-star"/></svg>
+      <svg class="icon-lg" style="color:#e11d48"><use xlink:href="#i-heart" xmlns:xlink="http://www.w3.org/1999/xlink"/></svg>
+      <svg class="icon-lg" style="fill:#facc15"><use href="#i-bolt"/></svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>Progress ring and chart (CSS-styled SVG)</h2>
+    <div class="row">
+      <svg class="ring" viewBox="0 0 120 120">
+        <circle class="track" cx="60" cy="60" r="50" fill="none" stroke-width="10"/>
+        <circle class="bar" cx="60" cy="60" r="50" fill="none" stroke-width="10"/>
+        <text class="ring-label" x="60" y="60">70%</text>
+      </svg>
+      <svg class="chart" viewBox="0 0 520 220">
+        <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7c3aed" stop-opacity=".35"/><stop offset="1" stop-color="#7c3aed" stop-opacity="0"/></linearGradient></defs>
+        <text class="title" x="0" y="16">Revenue</text>
+        <line class="grid" x1="40" y1="60" x2="520" y2="60"/><line class="grid" x1="40" y1="120" x2="520" y2="120"/><line class="grid" x1="40" y1="180" x2="520" y2="180"/>
+        <text class="axis end" x="32" y="64">$30k</text><text class="axis end" x="32" y="124">$20k</text><text class="axis end" x="32" y="184">$10k</text>
+        <path class="area" d="M40 170 L120 150 L200 160 L280 110 L360 120 L440 80 L520 70 L520 200 L40 200 Z"/>
+        <path class="line" d="M40 170 L120 150 L200 160 L280 110 L360 120 L440 80 L520 70"/>
+        <text class="axis" x="40" y="216">Jan</text><text class="axis" x="200" y="216">Mar</text><text class="axis" x="360" y="216">May</text><text class="axis end" x="520" y="216">Jul</text>
+      </svg>
+    </div>
+  </section>
+
+  <section style="padding:0;background:#f5f3ff">
+    <div style="padding:32px 48px"><h2 style="margin:0">Wave divider (preserveAspectRatio="none")</h2></div>
+    <svg class="wave" viewBox="0 0 1440 320" preserveAspectRatio="none"><path fill="#7c3aed" d="M0,160L60,170.7C120,181,240,203,360,186.7C480,171,600,117,720,112C840,107,960,149,1080,170.7C1200,192,1320,192,1380,192L1440,192L1440,320L0,320Z"/></svg>
+  </section>
+
+  <section>
+    <h2>No viewBox, clipPath and mask</h2>
+    <div class="row">
+      <svg width="80" height="80"><circle cx="40" cy="40" r="36" fill="#22c55e"/><rect x="20" y="36" width="40" height="8" fill="#fff"/></svg>
+      <svg width="120" height="80" viewBox="0 0 120 80">
+        <defs><clipPath id="cp"><circle cx="40" cy="40" r="36"/></clipPath><mask id="mk"><rect width="120" height="80" fill="#fff"/><circle cx="90" cy="40" r="16" fill="#000"/></mask></defs>
+        <rect width="120" height="80" fill="#0ea5e9" clip-path="url(#cp)"/>
+        <rect x="60" width="60" height="80" fill="#f43f5e" mask="url(#mk)"/>
+      </svg>
+    </div>
+  </section>
+</body>
+</html>

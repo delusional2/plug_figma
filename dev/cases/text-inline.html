@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Docs article</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #fff; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 56px 24px; }
+  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6366f1; }
+  h1 { margin: 12px 0 20px; font-size: 44px; line-height: 1.1; letter-spacing: -0.025em; font-weight: 800; }
+  .lead { font-size: 19px; line-height: 1.65; color: #475569; margin: 0 0 28px; }
+  p { font-size: 16px; line-height: 1.75; margin: 0 0 18px; color: #334155; }
+  code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.875em; padding: 2px 6px; border-radius: 6px; background: #f1f5f9; color: #be185d; }
+  mark { background: #fef08a; color: inherit; padding: 0 2px; }
+  a { color: #4f46e5; text-decoration: underline; text-decoration-color: rgba(79,70,229,.35); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  .deleted { text-decoration: line-through; color: #94a3b8; }
+  .wavy { text-decoration: underline wavy #ef4444; }
+  sup, sub { font-size: 0.7em; }
+  .price { display: flex; align-items: baseline; gap: 10px; margin: 28px 0; }
+  .price .old { font-size: 18px; text-decoration: line-through; color: #94a3b8; }
+  .price .new { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; }
+  .price .per { font-size: 14px; color: #64748b; }
+  .note { padding: 16px 20px; border-left: 4px solid #6366f1; background: #eef2ff; border-radius: 0 12px 12px 0; font-size: 15px; line-height: 1.6; color: #3730a3; }
+  .underline-all { text-decoration: underline; }
+  .underline-all strong { color: #0f172a; }
+  .kbd { font-family: ui-monospace, monospace; font-size: 13px; padding: 1px 6px; border: 1px solid #cbd5e1; border-bottom-width: 2px; border-radius: 5px; background: #f8fafc; }
+</style>
+</head>
+<body>
+  <article class="wrap">
+    <div class="eyebrow">Guides · Getting started</div>
+    <h1>Ship your first edge function in under five minutes</h1>
+    <p class="lead">Edge functions run <em>close to your users</em>, start in milliseconds and scale to zero. This guide walks through creating, testing and deploying one with the <strong>CLI</strong>.</p>
+
+    <p>Install the CLI with <code>npm i -g @acme/cli</code> and run <code>acme login</code>. You will be redirected to the browser to authorize the device; once finished, the terminal prints <mark>Logged in as you@example.com</mark> and stores a token in <code>~/.acme/config.json</code>. Read more about <a href="#">authentication scopes and token rotation</a> in the security docs.</p>
+
+    <p>Water is H<sub>2</sub>O and the area of a circle is πr<sup>2</sup>. Pricing used to be <span class="deleted">$29 per seat</span> but is now flat. A <span class="wavy">speling</span> mistake gets a wavy underline. Press <span class="kbd">⌘</span> + <span class="kbd">K</span> to open the command palette anywhere in the dashboard.</p>
+
+    <p class="underline-all">This whole sentence is underlined by its parent, including the <strong>bold part</strong> and <em>the italic tail</em>.</p>
+
+    <p>Font weights: <span style="font-weight:300">Light 300</span>, <span style="font-weight:500">Medium 500</span>, <span style="font-weight:600">Semibold 600</span>, <span style="font-weight:800">Extrabold 800</span>, and <i>italic</i> / <b><i>bold italic</i></b>. Emoji inline 🚀 ✨ 👋🏽 should stay in place.</p>
+
+    <p>Mixed sizes in one paragraph: normal text, <span style="font-size:26px;font-weight:700">a big phrase</span> that increases the line box, then normal text again that wraps onto the following line so we can see how the line height is affected.</p>
+
+    <div class="price"><span class="old">$49</span><span class="new">$19</span><span class="per">/ month</span></div>
+
+    <div class="note"><strong>Tip:</strong> set <code>ACME_ENV=preview</code> to deploy to a preview URL instead of production. Preview deployments are deleted automatically after 7 days.</div>
+  </article>
+</body>
+</html>

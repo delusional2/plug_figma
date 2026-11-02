@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Icon fonts</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, sans-serif; background: #f1f5f9; color: #0f172a; }
+  .app { display: grid; grid-template-columns: 240px 1fr; min-height: 640px; }
+  .side { padding: 24px 16px; background: #0f172a; color: #cbd5e1; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; color: #fff; font-weight: 700; font-size: 18px; }
+  .nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; color: inherit; text-decoration: none; font-size: 14px; }
+  .nav a.active { background: #1e293b; color: #fff; }
+  .nav i { width: 18px; text-align: center; }
+  .main { padding: 28px 32px; }
+  .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .top h1 { margin: 0; font-size: 24px; }
+  .icons { display: flex; gap: 12px; }
+  .ibtn { position: relative; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: #fff; border: 1px solid #e2e8f0; color: #334155; }
+  .ibtn .dot { position: absolute; top: 8px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .kpi { padding: 20px; border-radius: 14px; background: #fff; border: 1px solid #e2e8f0; }
+  .kpi .ic { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; margin-bottom: 14px; }
+  .kpi .v { font-size: 28px; font-weight: 700; }
+  .kpi .d { font-size: 13px; color: #16a34a; }
+  .kpi .d.neg { color: #dc2626; }
+  .material-icons { font-size: 20px; vertical-align: middle; }
+  .stars { color: #f59e0b; font-size: 14px; letter-spacing: 2px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 12px; font-weight: 600; }
+  .chip::before { content: "\f00c"; font-family: "Font Awesome 6 Free"; font-weight: 900; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><i class="fa-solid fa-bolt" style="color:#facc15"></i> Voltage</div>
+      <nav class="nav">
+        <a class="active"><i class="fa-solid fa-house"></i> Dashboard</a>
+        <a><i class="fa-solid fa-chart-line"></i> Analytics</a>
+        <a><i class="fa-regular fa-envelope"></i> Inbox</a>
+        <a><span class="material-icons">settings</span> Settings</a>
+      </nav>
+    </aside>
+    <main class="main">
+      <div class="top">
+        <h1>Overview</h1>
+        <div class="icons">
+          <div class="ibtn"><i class="fa-regular fa-bell"></i><span class="dot"></span></div>
+          <div class="ibtn"><span class="material-icons">search</span></div>
+        </div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="ic" style="background:#dcfce7;color:#16a34a"><i class="fa-solid fa-dollar-sign"></i></div><div class="v">$48,210</div><div class="d"><i class="fa-solid fa-arrow-up"></i> 12.4% vs last month</div></div>
+        <div class="kpi"><div class="ic" style="background:#e0e7ff;color:#4f46e5"><i class="fa-solid fa-users"></i></div><div class="v">3,912</div><div class="d neg"><i class="fa-solid fa-arrow-down"></i> 2.1% vs last month</div></div>
+        <div class="kpi"><div class="ic" style="background:#fef3c7;color:#d97706"><span class="material-icons">star</span></div><div class="v">4.8</div><div class="stars"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-regular fa-star"></i></div></div>
+      </div>
+      <p style="margin-top:24px"><span class="chip">Verified</span> <span class="chip">Synced</span></p>
+    </main>
+  </div>
+</body>
+</html>

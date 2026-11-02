@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media — logos, masks, lazy</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
+  section { padding: 40px 48px; }
+  h2 { margin: 0 0 16px; font-size: 20px; }
+  .row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .tile { width: 240px; }
+  .tile p { margin: 8px 0 0; font-size: 13px; color: #64748b; }
+  .frame { width: 240px; height: 160px; background: #e2e8f0; border-radius: 12px; display: block; }
+  /* object-fit / object-position */
+  .cover-top { object-fit: cover; object-position: top; }
+  .cover-left { object-fit: cover; object-position: 0% 50%; }
+  .contain { object-fit: contain; background: #0f172a; }
+  .none { object-fit: none; object-position: 20% 30%; }
+  .stretch { /* object-fit: fill (the default) stretches */ }
+  .scale-down { object-fit: scale-down; background: #fde68a; }
+  /* aspect-ratio */
+  .ratio { width: 240px; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 9999px; }
+  .ratio-video { width: 360px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 16px; }
+  /* rounded clipping parent */
+  .card { width: 320px; border-radius: 20px; overflow: hidden; background: #fff; box-shadow: 0 10px 30px rgba(15,23,42,.12); }
+  .card img { display: block; width: 100%; height: 180px; object-fit: cover; }
+  .card .body { padding: 16px 20px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card span { font-size: 14px; color: #64748b; }
+  /* avatars */
+  .avatars { display: flex; }
+  .avatars img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 3px #fff; margin-left: -12px; }
+  .avatars img:first-child { margin-left: 0; }
+  .ringed { width: 96px; height: 96px; border-radius: 50%; border: 4px solid #6366f1; padding: 4px; background: #fff; object-fit: cover; }
+  /* logo cloud */
+  .logos { display: flex; gap: 40px; align-items: center; }
+  .logos img { height: 40px; width: auto; filter: grayscale(100%); opacity: .6; }
+  /* fade mask */
+  .fade { width: 480px; height: 220px; object-fit: cover; border-radius: 16px; -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent); mask-image: linear-gradient(to bottom, #000 40%, transparent); }
+  .blob { width: 220px; height: 220px; object-fit: cover; clip-path: circle(45% at 50% 50%); }
+  .broken { width: 160px; height: 120px; border: 1px dashed #94a3b8; }
+  .spacer { height: 1200px; display: flex; align-items: flex-end; padding: 0 48px; color: #94a3b8; }
+</style>
+</head>
+<body>
+  <section>
+    <h2>Logo cloud (SVG files as img, data: URIs, grayscale)</h2>
+    <div class="logos">
+      <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='8' viewBox='0 0 120 40'><rect width='40' height='40' rx='10' fill='%23ef4444'/><text x='50' y='28' font-family='Arial' font-size='22' font-weight='700' fill='%232563eb'>Acme</text></svg>" alt="acme svg">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAgNDAiPjxjaXJjbGUgY3g9IjIwIiBjeT0iMjAiIHI9IjE4IiBmaWxsPSIjMTBiOTgxIi8+PHJlY3QgeD0iNDYiIHk9IjEyIiB3aWR0aD0iNzAiIGhlaWdodD0iMTYiIHJ4PSI4IiBmaWxsPSIjZjU5ZTBiIi8+PC9zdmc+" alt="no size svg">
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAGUlEQVR4nGP4z8DwnxzM8J+BgYEJZgABAAD5iQ9xWTk7FAAAAABJRU5ErkJggg==" style="width:40px;height:40px;image-rendering:pixelated" alt="png data">
+      <img src="https://picsum.photos/id/1062/160/80.webp" alt="webp logo">
+    </div>
+  </section>
+
+  <section>
+    <h2>Masks, clip-path, broken image</h2>
+    <div class="row">
+      <img class="fade" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=720&q=70&fm=avif" alt="fade mask">
+      <img class="blob" src="https://picsum.photos/id/1015/800/500" alt="circle clip">
+      <img class="broken" src="https://images.unsplash.com/this-photo-does-not-exist-404?w=100" alt="Broken product photo">
+    </div>
+  </section>
+
+  <div class="spacer">scroll ↓</div>
+  <section>
+    <h2>Lazy below the fold</h2>
+    <div class="row">
+      <img loading="lazy" class="frame cover-top" src="https://picsum.photos/id/1043/300/300" alt="lazy 1">
+      <img loading="lazy" decoding="async" class="frame" style="object-fit:cover" src="https://picsum.photos/id/1025/400/600" alt="lazy 2">
+    </div>
+  </section>
+</body>
+</html>

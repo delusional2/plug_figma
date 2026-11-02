@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Forms</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 40px 64px; font-family: Inter, sans-serif; color: #111827; background: #f9fafb; font-size: 14px; }
+  .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .panel { padding: 28px; border-radius: 16px; background: #fff; border: 1px solid #e5e7eb; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  label { font-weight: 500; }
+  .input { height: 40px; padding: 0 12px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; background: #fff; color: #111827; }
+  .input::placeholder { color: #9ca3af; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+  textarea.input { height: 96px; padding: 10px 12px; resize: none; }
+  textarea.input::placeholder { color: #c084fc; }
+  .accent { accent-color: #db2777; }
+  .btn { height: 40px; padding: 0 18px; border: 0; border-radius: 8px; background: #111827; color: #fff; font: inherit; font-weight: 600; }
+  .btn-outline { height: 40px; padding: 0 18px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; font: inherit; }
+  .cbox { appearance: none; width: 20px; height: 20px; margin: 0; border: 2px solid #9ca3af; border-radius: 6px; display: grid; place-content: center; background: #fff; }
+  .cbox:checked { background: #4f46e5; border-color: #4f46e5; }
+  .cbox:checked::before { content: ""; width: 10px; height: 6px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: translateY(-1px) rotate(-45deg); }
+  .switch { appearance: none; position: relative; width: 44px; height: 24px; margin: 0; border-radius: 999px; background: #d1d5db; }
+  .switch::before { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .switch:checked { background: #10b981; }
+  .switch:checked::before { left: 22px; }
+  details { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; background: #fff; }
+  summary { font-weight: 600; }
+  hr { margin: 24px 0; }
+  hr.soft { border: 0; height: 1px; background: #e5e7eb; }
+  progress { width: 100%; height: 10px; }
+  meter { width: 100%; }
+  .sel { height: 40px; padding: 0 12px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; background: #fff; }
+  .sel-custom { appearance: none; height: 40px; padding: 0 36px 0 12px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <form class="panel">
+      <div class="field"><label>Full name</label><input class="input" type="text" placeholder="Jane Cooper"></div>
+      <div class="field"><label>Email</label><input class="input" type="email" value="jane@acme.com"></div>
+      <div class="field"><label>Password</label><input class="input" type="password" value="hunter22"></div>
+      <div class="field"><label>Seats</label><input class="input" type="number" value="12"></div>
+      <div class="field"><label>Start date</label><input class="input" type="date" value="2026-11-02"></div>
+      <div class="field"><label>Country (native)</label><select class="sel"><option>United States</option><option>Germany</option></select></div>
+      <div class="field"><label>Plan (custom select)</label><select class="sel-custom"><option>Pro — $29/mo</option></select></div>
+      <div class="field"><label>Message</label><textarea class="input" placeholder="Tell us about your project…"></textarea></div>
+      <div class="row"><button class="btn" type="submit">Create account</button><button class="btn-outline" type="button">Cancel</button><input type="submit" value="Send" class="btn"></div>
+    </form>
+    <div class="panel">
+      <div class="row"><input type="checkbox" checked> <span>Native checkbox (checked)</span></div>
+      <div class="row"><input type="checkbox"> <span>Native checkbox</span></div>
+      <div class="row"><input type="checkbox" class="accent" checked> <span>accent-color pink</span></div>
+      <div class="row"><input type="radio" name="r" checked> <span>Radio A</span> <input type="radio" name="r"> <span>Radio B</span></div>
+      <div class="row"><input type="checkbox" class="cbox" checked> <span>Custom checkbox (checked)</span></div>
+      <div class="row"><input type="checkbox" class="cbox"> <span>Custom checkbox</span></div>
+      <div class="row"><input type="checkbox" class="switch" checked> <span>Toggle on</span> <input type="checkbox" class="switch"> <span>Toggle off</span></div>
+      <div class="row"><input type="range" min="0" max="100" value="70" class="accent" style="width:200px"> <span>Range</span></div>
+      <div class="row"><input type="color" value="#4f46e5"> <input type="file"></div>
+      <div class="field"><label>Upload progress</label><progress value="65" max="100"></progress></div>
+      <div class="field"><label>Disk usage</label><meter value="0.8" min="0" max="1" low="0.3" high="0.7" optimum="0.2"></meter></div>
+      <hr>
+      <details open><summary>What is included?</summary><p style="margin:8px 0 0">All features, unlimited seats.</p></details>
+      <details><summary>Can I cancel anytime?</summary><p>Yes.</p></details>
+      <hr class="soft">
+      <p style="margin:0;color:#6b7280">Footer note under a soft rule.</p>
+    </div>
+  </div>
+</body>
+</html>

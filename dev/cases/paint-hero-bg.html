@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nebula — AI hero</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: Inter, sans-serif; background: #0b0b12; color: #e5e7eb; }
+  /* 1. dot grid hero + radial glows positioned off-center */
+  .hero {
+    position: relative; height: 420px; padding: 80px 64px; overflow: hidden;
+    background-color: #0b0b12;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120, 119, 198, 0.55), transparent 40%),
+      radial-gradient(ellipse at top right, rgba(236, 72, 153, 0.45), transparent 50%),
+      radial-gradient(rgba(255, 255, 255, 0.22) 1px, transparent 1px);
+    background-size: auto, auto, 24px 24px;
+  }
+  .hero h1 { font-size: 56px; font-weight: 800; letter-spacing: -0.02em; max-width: 720px; line-height: 1.1; }
+  .hero p { margin-top: 20px; font-size: 18px; color: #a1a1aa; max-width: 560px; }
+  /* 2. blurred decorative blob */
+  .blob { position: absolute; right: 120px; top: 160px; width: 260px; height: 260px; border-radius: 9999px;
+    background: linear-gradient(135deg, #6366f1, #22d3ee); filter: blur(60px); opacity: .6; }
+  /* 3. grid-lines section */
+  .grid-lines {
+    height: 260px; display: flex; align-items: center; justify-content: center; gap: 24px;
+    background-color: #0f0f1a;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,.07) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: center center;
+  }
+  /* 4. gradient border via padding-box / border-box trick */
+  .gb-card { width: 300px; padding: 28px; border-radius: 20px; border: 2px solid transparent;
+    background: linear-gradient(#14141f, #14141f) padding-box, linear-gradient(120deg, #f472b6, #8b5cf6, #22d3ee) border-box; }
+  .gb-card h3 { font-size: 20px; font-weight: 600; }
+  .gb-card p { margin-top: 8px; font-size: 14px; color: #9ca3af; }
+  /* 5. glass card over the grid */
+  .glass { width: 300px; padding: 28px; border-radius: 20px; background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: 0 8px 32px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.12); }
+  .glass h3 { font-size: 20px; font-weight: 600; }
+  .glass p { margin-top: 8px; font-size: 14px; color: #9ca3af; }
+  /* 6. stripes */
+  .stripes { height: 56px; display: flex; align-items: center; padding: 0 64px; font-weight: 600; color: #111;
+    background: repeating-linear-gradient(-45deg, #facc15 0 16px, #fde047 16px 32px); }
+  /* 7. image + gradient overlay as multiple backgrounds, positioned */
+  .photo { height: 320px; padding: 48px 64px; display: flex; align-items: flex-end;
+    background:
+      linear-gradient(to top, rgba(11,11,18,.95) 0%, rgba(11,11,18,0) 60%),
+      url("https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&q=60") center 70% / cover no-repeat; }
+  .photo h2 { font-size: 36px; font-weight: 800; }
+  /* 8. hard stops & checker */
+  .row { display: flex; gap: 24px; padding: 48px 64px; }
+  .tile { width: 160px; height: 120px; border-radius: 16px; }
+  .hard { background: linear-gradient(90deg, #ef4444 0 33.3%, #f59e0b 33.3% 66.6%, #10b981 66.6%); }
+  .checker { background-color: #fff; background-image:
+      linear-gradient(45deg, #d4d4d8 25%, transparent 25%), linear-gradient(-45deg, #d4d4d8 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #d4d4d8 75%), linear-gradient(-45deg, transparent 75%, #d4d4d8 75%);
+    background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0; }
+  .spot { background: radial-gradient(circle closest-side at 30% 40%, #fde68a, #f97316 60%, #7c2d12); }
+  .sized { background: #1e1b4b radial-gradient(120px circle at 100% 0%, #a78bfa, transparent); }
+  .rainbow { background: linear-gradient(90deg, red, orange, yellow, lime, cyan, blue, violet, magenta, red); }
+  .half { background: linear-gradient(#4f46e5, #4f46e5) no-repeat left / 50% 100%, #e0e7ff; }
+</style>
+</head>
+<body>
+  <section class="hero">
+    <div class="blob"></div>
+    <h1>Ship AI features your users actually love</h1>
+    <p>Nebula is the platform for building, evaluating and deploying LLM apps — in minutes, not months.</p>
+  </section>
+  <div class="stripes">Scheduled maintenance: Saturday 02:00–04:00 UTC</div>
+  <section class="grid-lines">
+    <div class="gb-card"><h3>Gradient border</h3><p>Padding-box over border-box backgrounds with a transparent border.</p></div>
+    <div class="glass"><h3>Glass card</h3><p>Backdrop blur, translucent border and an inset highlight.</p></div>
+  </section>
+  <section class="photo"><h2>Built for teams in the wild</h2></section>
+  <div class="row">
+    <div class="tile hard"></div>
+    <div class="tile checker"></div>
+    <div class="tile spot"></div>
+    <div class="tile sized"></div>
+    <div class="tile rainbow"></div>
+    <div class="tile half"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hero typography</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,600;0,800;1,400&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Plus Jakarta Sans", sans-serif; background: #0b0b12; color: #e5e7eb; }
+  .hero { padding: 88px 24px 64px; text-align: center; }
+  .pill { display: inline-block; padding: 6px 14px; border: 1px solid rgba(255,255,255,.15); border-radius: 999px; font-size: 13px; color: #c4b5fd; letter-spacing: .02em; }
+  h1 { max-width: 900px; margin: 24px auto 20px; font-size: clamp(40px, 7vw, 84px); line-height: .95; letter-spacing: -0.045em; font-weight: 800; background: linear-gradient(90deg, #a78bfa 0%, #f472b6 50%, #fb923c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { max-width: 600px; margin: 0 auto 36px; font-size: 18px; line-height: 1.6; color: #9ca3af; }
+  .glow { font-size: 28px; font-weight: 600; color: #fff; text-shadow: 0 0 24px rgba(167,139,250,.9), 0 2px 4px rgba(0,0,0,.6); margin: 0 0 48px; }
+  .serif { font-family: "Playfair Display", Georgia, serif; font-style: italic; font-size: 40px; font-weight: 700; color: #fde68a; margin: 0 0 40px; }
+  .missing { font-family: "Totally Missing Font", "Another Missing", Georgia, serif; font-size: 22px; color: #e5e7eb; margin: 0 0 40px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; max-width: 900px; margin: 0 auto; }
+  .stat { padding: 24px; border-radius: 16px; background: #151521; border: 1px solid #23233a; text-align: left; }
+  .stat .n { font-size: 44px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; color: #fff; }
+  .stat .l { margin-top: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: #9ca3af; }
+  .quote { max-width: 760px; margin: 72px auto 0; padding: 0 24px; text-align: left; }
+  .quote p { margin: 0 0 16px; font-size: 17px; line-height: 1.7; text-indent: 2em; color: #d1d5db; text-align: justify; }
+  .quote cite { display: block; font-style: normal; font-size: 14px; color: #a78bfa; text-align: right; }
+  .rtl { max-width: 760px; margin: 48px auto 0; padding: 0 24px; direction: rtl; text-align: right; font-size: 18px; line-height: 1.8; color: #e5e7eb; }
+  .caps { font-variant: small-caps; font-size: 18px; letter-spacing: .05em; text-align: center; margin: 48px 0 0; color: #fbcfe8; }
+  .tight { font-size: 15px; line-height: normal; max-width: 420px; margin: 32px auto; text-align: left; }
+  .lh-unitless { font-size: 15px; line-height: 2; max-width: 420px; margin: 0 auto 64px; text-align: left; color: #a1a1aa; }
+</style>
+</head>
+<body>
+  <section class="hero">
+    <span class="pill">✨ Introducing Nova 2.0</span>
+    <h1>Build delightful products at the speed of thought</h1>
+    <p class="sub">Nova gives your team a shared canvas for ideas, specs and shipped work — with AI that understands your codebase.</p>
+    <p class="glow">Glowing headline with text-shadow</p>
+    <p class="serif">“Design is how it works.”</p>
+    <p class="missing">This family is not installed anywhere and falls back to Georgia.</p>
+    <div class="stats">
+      <div class="stat"><div class="n">12.4k</div><div class="l">Teams onboarded</div></div>
+      <div class="stat"><div class="n">99.99%</div><div class="l">Uptime last year</div></div>
+      <div class="stat"><div class="n">−38%</div><div class="l">Time to ship</div></div>
+    </div>
+  </section>
+  <section class="quote">
+    <p>We moved our entire product org to Nova in a single sprint. The biggest change was not the tooling but the habits: specs live next to designs, designs live next to code, and nobody asks where the latest version is anymore.</p>
+    <p>Six months later our cycle time is down by a third and onboarding a new engineer takes days instead of weeks.</p>
+    <cite>— Priya Raman, VP Product at Lumen</cite>
+  </section>
+  <p class="rtl">مرحباً بكم في منصتنا. نحن نساعد الفرق على بناء منتجات رائعة بسرعة أكبر، مع أدوات تعاون حديثة تعمل في المتصفح مباشرة.</p>
+  <p class="caps">Small caps are rendered by the browser</p>
+  <p class="tight">Line-height normal: the browser uses the font's own ascent and descent, which differs between families and between Chrome and Figma.</p>
+  <p class="lh-unitless">Unitless line-height 2 on a fifteen pixel font gives thirty pixel lines, and it should be exported as a pixel value per segment so wrapping in Figma matches.</p>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lists</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; padding: 48px 64px; font-family: Inter, sans-serif; color: #1f2937; background: #fff; font-size: 16px; line-height: 1.6; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+  h3 { margin: 0 0 12px; font-size: 18px; }
+  .colored li::marker { color: #2563eb; font-weight: 700; }
+  ol.alpha { list-style-type: lower-alpha; }
+  ol.roman { list-style-type: upper-roman; }
+  ul.square { list-style: square; }
+  .features { list-style: none; padding: 0; margin: 0; }
+  .features li { position: relative; padding-left: 32px; margin-bottom: 12px; }
+  .features li::before { content: "✓"; position: absolute; left: 0; top: 1px; width: 20px; height: 20px; border-radius: 50%; background: #dcfce7; color: #16a34a; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
+  .img-bullets { list-style-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Crect width='12' height='12' rx='3' fill='%23f97316'/%3E%3C/svg%3E"); }
+  .inside { list-style-position: inside; padding: 0; }
+  .inside li { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; }
+  .custom-ol { list-style: none; counter-reset: item; padding: 0; }
+  .custom-ol li { counter-increment: item; display: flex; gap: 12px; align-items: baseline; margin-bottom: 10px; }
+  .custom-ol li::before { content: counter(item) "."; font-weight: 700; color: #9333ea; min-width: 20px; }
+  .emoji li::marker { content: "👉 "; }
+  .dash { list-style: "— "; }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div>
+      <h3>Default bullets</h3>
+      <ul>
+        <li>Unlimited projects</li>
+        <li>Priority support with a longer line that wraps onto a second line inside the column</li>
+        <li>Nested list
+          <ul><li>Circle child one</li><li>Circle child two</li></ul>
+        </li>
+      </ul>
+    </div>
+    <div>
+      <h3>Ordered</h3>
+      <ol>
+        <li>Create an account</li>
+        <li>Verify your email</li>
+        <li>Invite your team</li>
+      </ol>
+      <ol start="7" class="colored"><li>Seventh</li><li>Eighth</li></ol>
+    </div>
+    <div>
+      <h3>Alpha / Roman</h3>
+      <ol class="alpha"><li>Alpha one</li><li>Alpha two</li></ol>
+      <ol class="roman"><li>Roman one</li><li>Roman two</li><li>Roman three</li></ol>
+    </div>
+    <div>
+      <h3>Checkmark features</h3>
+      <ul class="features">
+        <li>Real-time collaboration</li>
+        <li>Version history</li>
+        <li>SSO and audit logs</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Colored markers / square</h3>
+      <ul class="colored"><li>Blue marker</li><li>Another</li></ul>
+      <ul class="square"><li>Square one</li><li>Square two</li></ul>
+    </div>
+    <div>
+      <h3>Image bullets</h3>
+      <ul class="img-bullets"><li>Orange square image</li><li>Second item</li></ul>
+    </div>
+    <div>
+      <h3>Inside position</h3>
+      <ol class="inside"><li>Inside one</li><li>Inside two</li></ol>
+    </div>
+    <div>
+      <h3>Counter list</h3>
+      <ol class="custom-ol"><li>Plan the work</li><li>Work the plan</li><li>Review</li></ol>
+    </div>
+    <div>
+      <h3>String markers</h3>
+      <ul class="emoji"><li>Emoji marker</li><li>Second</li></ul>
+      <ul class="dash"><li>Dash marker</li><li>Another dash</li></ul>
+    </div>
+  </div>
+</body>
+</html>

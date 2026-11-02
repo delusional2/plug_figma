@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Admin report</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, sans-serif; color: #111827; background: #fff; }
+  .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+  aside { background: #111827; color: #d1d5db; padding: 24px 16px; }
+  aside h1 { color: #fff; font-size: 18px; margin: 0 0 24px; }
+  aside ul { list-style: none; margin: 0; padding: 0; }
+  aside li a { display: block; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+  aside li a.active { background: #374151; color: #fff; }
+  main { padding: 32px 40px; }
+  .crumbs a { display: inline-block; font-size: 13px; color: #6b7280; margin-right: 6px; }
+  .crumbs a:after { content: " /"; }
+  h2 { font-size: 26px; margin: 8px 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 24px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .kpi { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+  .kpi span { font-size: 13px; color: #6b7280; }
+  .kpi strong { display: block; font-size: 28px; margin-top: 4px; }
+  .kpi em { font-style: normal; font-size: 12px; color: #059669; background: #d1fae5; padding: 2px 6px; border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 28px; }
+  thead th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; background: #f9fafb; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+  tbody td { padding: 12px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .ok { background: #d1fae5; color: #065f46; }
+  .warn { background: #fef3c7; color: #92400e; }
+  .user { display: flex; align-items: center; gap: 10px; }
+  .user img { width: 28px; height: 28px; border-radius: 50%; }
+  .note { overflow: hidden; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 28px; }
+  .note img { float: left; width: 120px; height: 90px; object-fit: cover; border-radius: 8px; margin: 0 16px 8px 0; }
+  .note p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: #374151; }
+  .steps { padding-left: 20px; margin: 0 0 28px; font-size: 14px; line-height: 1.8; }
+  dl { display: grid; grid-template-columns: 160px 1fr; gap: 8px 16px; font-size: 14px; margin: 0; }
+  dt { color: #6b7280; }
+  dd { margin: 0; }
+  .toolbar { margin-bottom: 16px; }
+  .toolbar button { display: inline-block; padding: 6px 12px; border: 1px solid #d1d5db; background: #fff; border-radius: 6px; font: inherit; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <h1>Northwind</h1>
+    <ul>
+      <li><a class="active">Dashboard</a></li>
+      <li><a>Orders</a></li>
+      <li><a>Customers</a></li>
+      <li><a>Reports</a></li>
+    </ul>
+  </aside>
+  <main>
+    <nav class="crumbs"><a>Home</a><a>Reports</a><a>Q3</a></nav>
+    <h2>Quarterly report</h2>
+    <p class="sub">Updated 2 hours ago</p>
+
+    <div class="kpis">
+      <div class="kpi"><span>Revenue</span><strong>$482k</strong><em>+12.4%</em></div>
+      <div class="kpi"><span>Orders</span><strong>3,912</strong><em>+4.1%</em></div>
+      <div class="kpi"><span>Customers</span><strong>1,204</strong><em>+8.0%</em></div>
+      <div class="kpi"><span>Refunds</span><strong>23</strong><em>-2.0%</em></div>
+    </div>
+
+    <div class="toolbar"><button>Export CSV</button> <button>Print</button> <button>Share</button></div>
+
+    <table>
+      <thead><tr><th>Customer</th><th>Status</th><th>Date</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>
+        <tr><td><div class="user"><img src="https://picsum.photos/seed/u1/56/56" alt="">Jane Cooper</div></td><td><span class="pill ok">Paid</span></td><td>Sep 12, 2026</td><td class="num">$1,240.00</td></tr>
+        <tr><td><div class="user"><img src="https://picsum.photos/seed/u2/56/56" alt="">Wade Warren</div></td><td><span class="pill warn">Pending</span></td><td>Sep 11, 2026</td><td class="num">$89.50</td></tr>
+        <tr><td><div class="user"><img src="https://picsum.photos/seed/u3/56/56" alt="">Esther Howard</div></td><td><span class="pill ok">Paid</span></td><td>Sep 9, 2026</td><td class="num">$12,000.00</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <img src="https://picsum.photos/seed/note/240/180" alt="">
+      <p><b>Analyst note.</b> Revenue grew on the back of the new subscription tier, which now accounts for a third of all orders. Churn among legacy customers remained flat, and refunds declined for the third quarter in a row. We expect the holiday season to push numbers further up, especially in the EU region where the new payment methods launched in August.</p>
+    </div>
+
+    <ol class="steps">
+      <li>Reconcile refunds with the payment provider</li>
+      <li>Send the summary to the finance team</li>
+      <li>Archive the Q2 dashboards</li>
+    </ol>
+
+    <dl>
+      <dt>Owner</dt><dd>Finance &amp; Ops</dd>
+      <dt>Period</dt><dd>Jul 1 – Sep 30, 2026</dd>
+      <dt>Currency</dt><dd>USD</dd>
+    </dl>
+  </main>
+</div>
+</body>
+</html>

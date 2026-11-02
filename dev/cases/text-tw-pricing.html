@@ -1,0 +1,59 @@
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<div class="min-h-screen bg-white font-sans text-slate-900 antialiased">
+  <header class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+    <a class="text-lg font-bold tracking-tight">acme<span class="text-indigo-600">.</span></a>
+    <nav class="hidden gap-8 text-sm font-medium text-slate-600 md:flex">
+      <a>Product</a><a>Pricing</a><a class="text-slate-900 underline decoration-indigo-500 decoration-2 underline-offset-8">Customers</a><a>Docs</a>
+    </nav>
+    <button class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Sign in</button>
+  </header>
+
+  <section class="mx-auto max-w-3xl px-6 pt-16 pb-10 text-center">
+    <p class="text-sm font-semibold uppercase tracking-widest text-indigo-600">Pricing</p>
+    <h1 class="mt-3 text-4xl font-extrabold tracking-tight text-balance sm:text-6xl">Simple pricing for teams of every size</h1>
+    <p class="mx-auto mt-5 max-w-xl text-lg leading-8 text-pretty text-slate-600">Start free, upgrade when you need more. All plans include unlimited projects, SSO and priority support.</p>
+  </section>
+
+  <section class="mx-auto grid max-w-5xl gap-6 px-6 pb-16 md:grid-cols-3">
+    <div class="rounded-2xl border border-slate-200 p-8">
+      <h3 class="text-base font-semibold leading-7">Starter</h3>
+      <p class="mt-4 flex items-baseline gap-x-1"><span class="text-5xl font-bold tracking-tight">$0</span><span class="text-sm font-semibold text-slate-500">/month</span></p>
+      <p class="mt-4 text-sm leading-6 text-slate-600">For individuals exploring the platform.</p>
+      <ul class="mt-6 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-600 marker:text-indigo-500">
+        <li>5 projects</li>
+        <li>Community support with a longer label that wraps to a second line</li>
+        <li>1 GB storage</li>
+      </ul>
+    </div>
+    <div class="rounded-2xl bg-indigo-600 p-8 text-white ring-2 ring-indigo-600">
+      <div class="flex items-center justify-between"><h3 class="text-base font-semibold leading-7">Pro</h3><span class="rounded-full bg-white/20 px-2.5 py-1 text-xs font-semibold">Most popular</span></div>
+      <p class="mt-4 flex items-baseline gap-x-1"><span class="text-5xl font-bold tracking-tight">$24</span><span class="text-sm font-semibold text-indigo-200">/month</span></p>
+      <p class="mt-4 text-sm leading-6 text-indigo-100">Everything in Starter, plus advanced workflows.</p>
+      <ol class="mt-6 list-decimal space-y-2 pl-5 text-sm leading-6 text-indigo-100">
+        <li>Unlimited projects</li>
+        <li>Priority support</li>
+        <li>Advanced analytics</li>
+      </ol>
+    </div>
+    <div class="rounded-2xl border border-slate-200 p-8">
+      <h3 class="text-base font-semibold leading-7">Enterprise</h3>
+      <p class="mt-4 text-5xl font-bold tracking-tight">Custom</p>
+      <p class="mt-4 text-sm leading-6 text-slate-600">Dedicated infrastructure and a named account manager.</p>
+      <ul class="mt-6 space-y-3 text-sm leading-6 text-slate-600">
+        <li class="flex gap-x-3"><span class="text-indigo-600">✓</span>SAML SSO &amp; SCIM</li>
+        <li class="flex gap-x-3"><span class="text-indigo-600">✓</span>Audit logs retained for 365 days</li>
+        <li class="flex gap-x-3"><span class="text-indigo-600">✓</span>99.99% uptime SLA</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-3xl px-6 pb-20">
+    <h2 class="text-2xl font-bold tracking-tight">Frequently asked questions</h2>
+    <dl class="mt-6 divide-y divide-slate-200">
+      <div class="py-5"><dt class="font-semibold">Can I change plans later?</dt><dd class="mt-2 text-slate-600 leading-7">Yes. Upgrades take effect immediately and downgrades apply at the end of the billing cycle. <a class="font-medium text-indigo-600 hover:underline">Learn more →</a></dd></div>
+      <div class="py-5"><dt class="font-semibold">Do you offer discounts for non-profits?</dt><dd class="mt-2 text-slate-600 leading-7">We offer <strong class="font-semibold text-slate-900">50% off</strong> for registered non-profits and educational institutions.</dd></div>
+    </dl>
+    <p class="mt-10 truncate rounded-md bg-slate-100 px-3 py-2 font-mono text-xs text-slate-500">curl -X POST https://api.acme.dev/v1/subscriptions -H "Authorization: Bearer sk_test_xxx" -d plan=pro -d seats=25</p>
+    <p class="mt-6 line-clamp-2 text-sm text-slate-500">Prices exclude VAT. Annual billing gives two months free. Plans renew automatically unless cancelled before the renewal date. Usage above the included quota is billed per GB at the end of the month according to the price list.</p>
+  </section>
+</div>

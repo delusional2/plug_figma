@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media — images</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
+  section { padding: 40px 48px; }
+  h2 { margin: 0 0 16px; font-size: 20px; }
+  .row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .tile { width: 240px; }
+  .tile p { margin: 8px 0 0; font-size: 13px; color: #64748b; }
+  .frame { width: 240px; height: 160px; background: #e2e8f0; border-radius: 12px; display: block; }
+  /* object-fit / object-position */
+  .cover-top { object-fit: cover; object-position: top; }
+  .cover-left { object-fit: cover; object-position: 0% 50%; }
+  .contain { object-fit: contain; background: #0f172a; }
+  .none { object-fit: none; object-position: 20% 30%; }
+  .stretch { /* object-fit: fill (the default) stretches */ }
+  .scale-down { object-fit: scale-down; background: #fde68a; }
+  /* aspect-ratio */
+  .ratio { width: 240px; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 9999px; }
+  .ratio-video { width: 360px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 16px; }
+  /* rounded clipping parent */
+  .card { width: 320px; border-radius: 20px; overflow: hidden; background: #fff; box-shadow: 0 10px 30px rgba(15,23,42,.12); }
+  .card img { display: block; width: 100%; height: 180px; object-fit: cover; }
+  .card .body { padding: 16px 20px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card span { font-size: 14px; color: #64748b; }
+  /* avatars */
+  .avatars { display: flex; }
+  .avatars img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 3px #fff; margin-left: -12px; }
+  .avatars img:first-child { margin-left: 0; }
+  .ringed { width: 96px; height: 96px; border-radius: 50%; border: 4px solid #6366f1; padding: 4px; background: #fff; object-fit: cover; }
+  /* logo cloud */
+  .logos { display: flex; gap: 40px; align-items: center; }
+  .logos img { height: 40px; width: auto; filter: grayscale(100%); opacity: .6; }
+  /* fade mask */
+  .fade { width: 480px; height: 220px; object-fit: cover; border-radius: 16px; -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent); mask-image: linear-gradient(to bottom, #000 40%, transparent); }
+  .blob { width: 220px; height: 220px; object-fit: cover; clip-path: circle(45% at 50% 50%); }
+  .broken { width: 160px; height: 120px; border: 1px dashed #94a3b8; }
+  .spacer { height: 1200px; display: flex; align-items: flex-end; padding: 0 48px; color: #94a3b8; }
+</style>
+</head>
+<body>
+  <section>
+    <h2>object-fit and object-position</h2>
+    <div class="row">
+      <div class="tile"><img class="frame cover-top" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600&q=80" alt="portrait top"><p>cover · top</p></div>
+      <div class="tile"><img class="frame cover-left" src="https://picsum.photos/id/1015/800/500" alt="landscape left"><p>cover · left</p></div>
+      <div class="tile"><img class="frame contain" src="https://picsum.photos/id/1025/400/600" alt="dog contain"><p>contain</p></div>
+      <div class="tile"><img class="frame none" src="https://picsum.photos/id/1043/300/300" alt="none"><p>none · 20% 30%</p></div>
+      <div class="tile"><img class="frame stretch" src="https://picsum.photos/id/1043/300/300" alt="stretched"><p>fill (stretch)</p></div>
+      <div class="tile"><img class="frame scale-down" src="https://picsum.photos/id/1062/160/80.webp" alt="small"><p>scale-down (small img)</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>aspect-ratio, srcset, picture, WebP / AVIF</h2>
+    <div class="row">
+      <img class="ratio" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop&fm=webp" alt="webp avatar">
+      <img class="ratio-video"
+           srcset="https://picsum.photos/id/1018/480/270 480w, https://picsum.photos/id/1015/800/500 800w"
+           sizes="360px" src="https://picsum.photos/id/1018/480/270" alt="srcset">
+      <picture>
+        <source type="image/avif" srcset="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=720&q=70&fm=avif">
+        <img class="ratio-video" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=720&q=70&fm=avif" alt="picture avif">
+      </picture>
+    </div>
+  </section>
+
+  <section>
+    <h2>Cards, avatars and rings</h2>
+    <div class="row">
+      <div class="card">
+        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=900&q=80" alt="dashboard photo">
+        <div class="body"><h3>Quarterly review</h3><span>Image clipped by a rounded card</span></div>
+      </div>
+      <div>
+        <div class="avatars">
+          <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600&q=80" alt="a1">
+          <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=400&fit=crop&fm=webp" alt="a2">
+          <img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop" alt="a3">
+          <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&h=200&fit=crop" alt="a4">
+        </div>
+        <p style="margin:12px 0 24px;font-size:14px;color:#475569">Trusted by 2,000+ teams</p>
+        <img class="ringed" src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&h=200&fit=crop" alt="ringed avatar">
+      </div>
+    </div>
+  </section>
+
+</body>
+</html>

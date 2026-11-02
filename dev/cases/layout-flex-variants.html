@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flex variants</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  /* nav: space-between, center group */
+  .nav { display: flex; justify-content: space-between; align-items: center; height: 64px; }
+  .logo { font-weight: 800; font-size: 20px; }
+  .links { display: flex; gap: 28px; font-size: 14px; color: #475569; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-size: 14px; font-weight: 600; text-decoration: none; }
+  .btn-primary { background: #4f46e5; color: #fff; }
+  .btn-ghost { border: 1px solid #cbd5e1; color: #0f172a; background: #fff; }
+  section { padding: 56px 0; }
+  /* section header: unequal margins (very common) */
+  .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #4f46e5; margin-bottom: 12px; }
+  h1 { font-size: 52px; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 20px; }
+  .lead { font-size: 18px; line-height: 1.6; color: #475569; max-width: 640px; margin-bottom: 36px; }
+  .hero { text-align: center; }
+  .hero .lead { margin-left: auto; margin-right: auto; }
+  .cta-row { display: flex; justify-content: center; gap: 12px; }
+  /* justify variants */
+  .demo { display: flex; height: 64px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0 16px; align-items: center; margin-bottom: 12px; }
+  .chip { padding: 8px 14px; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 13px; font-weight: 500; }
+  .end { justify-content: flex-end; gap: 10px; }
+  .around { justify-content: space-around; }
+  .evenly { justify-content: space-evenly; }
+  /* pricing: stretch + baseline + mt-auto */
+  .plans { display: flex; gap: 24px; align-items: stretch; }
+  .plan { flex: 1; display: flex; flex-direction: column; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 28px; }
+  .plan.featured { border: 2px solid #4f46e5; box-shadow: 0 10px 30px rgba(79,70,229,.15); }
+  .plan h3 { font-size: 18px; margin-bottom: 8px; }
+  .price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 16px; }
+  .price strong { font-size: 44px; font-weight: 800; }
+  .price span { font-size: 14px; color: #64748b; }
+  .plan ul { list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 14px; color: #334155; margin-bottom: 24px; }
+  .plan li { display: flex; gap: 8px; align-items: center; }
+  .plan li::before { content: ""; width: 16px; height: 16px; border-radius: 50%; background: #c7d2fe; flex: none; }
+  .plan .btn { margin-top: auto; justify-content: center; }
+  /* wrap */
+  .tags { display: flex; flex-wrap: wrap; gap: 10px 8px; max-width: 520px; }
+  /* form row: flex-1 input + button */
+  .subscribe { display: flex; gap: 8px; max-width: 480px; }
+  .subscribe input { flex: 1; height: 44px; padding: 0 14px; border: 1px solid #cbd5e1; border-radius: 10px; font: inherit; }
+  .feature { display: flex; gap: 16px; align-items: flex-start; }
+  .icon { width: 40px; height: 40px; border-radius: 10px; background: #4f46e5; flex: none; }
+  .feature p { font-size: 14px; color: #475569; line-height: 1.5; }
+  .feature h4 { font-size: 16px; margin-bottom: 4px; }
+  .split { display: flex; gap: 48px; }
+  .split > div { flex: 1; }
+  footer { border-top: 1px solid #e2e8f0; padding: 24px 0; }
+  .foot { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
+</style>
+</head>
+<body>
+  <header class="container">
+    <nav class="nav">
+      <div class="logo">Acme</div>
+      <div class="links"><a>Product</a><a>Pricing</a><a>Docs</a><a>Blog</a></div>
+      <div style="display:flex;gap:8px"><a class="btn btn-ghost">Sign in</a><a class="btn btn-primary">Get started</a></div>
+    </nav>
+  </header>
+
+  <section class="hero container">
+    <p class="eyebrow">New · Version 2.0</p>
+    <h1>Ship faster with layouts<br>that just work</h1>
+    <p class="lead">Acme turns your messy prototypes into production-ready interfaces in minutes, not weeks. No credit card required.</p>
+    <div class="cta-row"><a class="btn btn-primary">Start free trial</a><a class="btn btn-ghost">Book a demo</a></div>
+  </section>
+
+  <section class="container" style="padding-top:0">
+    <div class="demo end"><span class="chip">Cancel</span><span class="chip">Save draft</span><span class="chip">Publish</span></div>
+    <div class="demo around"><span class="chip">One</span><span class="chip">Two</span><span class="chip">Three</span></div>
+    <div class="demo evenly"><span class="chip">Alpha</span><span class="chip">Beta</span><span class="chip">Gamma</span><span class="chip">Delta</span></div>
+  </section>
+
+  <section class="container" style="padding-top:0">
+    <div class="plans">
+      <div class="plan">
+        <h3>Starter</h3>
+        <div class="price"><strong>$0</strong><span>/month</span></div>
+        <ul><li>1 project</li><li>Community support</li></ul>
+        <a class="btn btn-ghost">Choose Starter</a>
+      </div>
+      <div class="plan featured">
+        <h3>Pro</h3>
+        <div class="price"><strong>$29</strong><span>/month</span></div>
+        <ul><li>Unlimited projects</li><li>Priority support</li><li>Custom domains</li><li>Analytics</li></ul>
+        <a class="btn btn-primary">Choose Pro</a>
+      </div>
+      <div class="plan">
+        <h3>Enterprise</h3>
+        <div class="price"><strong>$99</strong><span>/month</span></div>
+        <ul><li>SSO &amp; SAML</li><li>Audit logs</li><li>Dedicated manager</li></ul>
+        <a class="btn btn-ghost">Contact sales</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="container split" style="padding-top:0">
+    <div>
+      <h4 style="font-size:20px;margin-bottom:16px">Popular topics</h4>
+      <div class="tags">
+        <span class="chip">Design systems</span><span class="chip">Accessibility</span><span class="chip">Performance</span>
+        <span class="chip">Animations</span><span class="chip">Dark mode</span><span class="chip">Typography</span>
+        <span class="chip">Responsive grids</span><span class="chip">Forms</span><span class="chip">Testing</span>
+      </div>
+      <h4 style="font-size:20px;margin:32px 0 16px">Get the newsletter</h4>
+      <form class="subscribe"><input placeholder="you@company.com"><button class="btn btn-primary" style="border:0">Subscribe</button></form>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:24px">
+      <div class="feature"><div class="icon"></div><div><h4>Lightning fast</h4><p>Optimized builds with automatic code splitting and edge caching across 300 locations.</p></div></div>
+      <div class="feature"><div class="icon" style="background:#0ea5e9"></div><div><h4>Secure by default</h4><p>SOC 2 Type II certified.</p></div></div>
+      <div class="feature"><div class="icon" style="background:#10b981"></div><div><h4>Team friendly</h4><p>Comments, branching and reviews built in, so your whole team can collaborate on every change.</p></div></div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container foot"><span>© 2026 Acme Inc.</span><div class="links" style="font-size:13px"><a>Privacy</a><a>Terms</a><a>Status</a></div></div>
+  </footer>
+</body>
+</html>

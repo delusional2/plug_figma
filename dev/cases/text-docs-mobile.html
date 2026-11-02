@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs mobile</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, sans-serif; background: #fff; color: #111827; }
+  main { padding: 24px 16px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 34px; line-height: 1.1; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 12px; }
+  h1 .grad { background: linear-gradient(90deg, #2563eb, #db2777); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .balanced { text-wrap: balance; text-align: center; font-size: 26px; line-height: 1.2; font-weight: 700; margin: 24px 0; }
+  pre { margin: 16px 0; padding: 14px; background: #111827; color: #f9fafb; border-radius: 10px; font: 13px/1.6 "JetBrains Mono", ui-monospace, monospace; overflow-x: auto; white-space: pre; }
+  .cmd { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font: 13px/1.4 ui-monospace, monospace; }
+  .cmd span { white-space: nowrap; overflow: hidden; }
+  .rtl { margin: 24px 0; font-size: 16px; line-height: 1.7; }
+  .shadowed { font-size: 22px; font-weight: 800; color: #fff; background: #1d4ed8; padding: 16px; border-radius: 12px; text-shadow: 0 2px 0 #1e3a8a; }
+  .fn { font-size: 15px; line-height: 1.6; color: #374151; }
+  .fn sup { color: #2563eb; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 16px; }
+  th { text-align: left; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; font-size: 11px; padding: 8px 6px; border-bottom: 1px solid #e5e7eb; }
+  td { padding: 10px 6px; border-bottom: 1px solid #f3f4f6; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deploy with <span class="grad">zero config</span> today</h1>
+  <p class="balanced">Everything you need to go from prototype to production</p>
+  <pre>npx create-acme-app@latest my-app --template=edge --use-pnpm
+cd my-app &amp;&amp; pnpm dev   # starts http://localhost:3000</pre>
+  <div class="cmd"><span>$ curl -fsSL https://get.acme.dev/install.sh | bash -s -- --yes</span></div>
+  <div class="shadowed">Text with a hard text-shadow</div>
+  <p class="fn">Edge regions are billed per request<sup>1</sup> and cold starts are under 50 ms<sup>[2]</sup> in most locations.</p>
+  <div dir="rtl" class="rtl">שלום עולם! זהו פסקה בעברית שמיושרת לימין כברירת מחדל כי הכיוון הוא מימין לשמאל, והיא ארוכה מספיק כדי לגלוש לשורה נוספת.</div>
+  <table>
+    <tr><th>Region</th><th>Latency</th><th style="text-align:right">Requests</th></tr>
+    <tr><td>Frankfurt (fra1)</td><td>12 ms</td><td class="num">1,204,332</td></tr>
+    <tr><td>São Paulo (gru1)</td><td>48 ms</td><td class="num">98,120</td></tr>
+  </table>
+</main>
+</body>
+</html>

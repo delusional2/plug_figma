@@ -1,0 +1,55 @@
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<div class="min-h-screen bg-white font-sans text-gray-900">
+  <!-- Feature grid: Tailwind UI style icons with bg + padding + radius directly on the <svg> -->
+  <section class="px-12 py-10">
+    <h2 class="text-2xl font-bold tracking-tight">Everything you need to ship</h2>
+    <div class="mt-8 grid grid-cols-3 gap-8">
+      <div class="flex gap-4">
+        <svg class="h-12 w-12 flex-none rounded-lg bg-indigo-600 p-3 text-white" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"/></svg>
+        <div><h3 class="font-semibold">Push to deploy</h3><p class="mt-1 text-sm text-gray-600">Icon has bg, padding and rounded corners on the svg itself.</p></div>
+      </div>
+      <div class="flex gap-4">
+        <svg class="h-12 w-12 flex-none rounded-full bg-emerald-100 p-2.5 text-emerald-600 ring-4 ring-emerald-50" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" clip-rule="evenodd"/></svg>
+        <div><h3 class="font-semibold">SSL certificates</h3><p class="mt-1 text-sm text-gray-600">Round svg with ring (box-shadow).</p></div>
+      </div>
+      <div class="flex gap-4">
+        <svg class="h-12 w-12 flex-none rounded-xl border-2 border-amber-300 bg-amber-50 p-2 text-amber-600 shadow-md" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+        <div><h3 class="font-semibold">Fast builds</h3><p class="mt-1 text-sm text-gray-600">Bordered svg with shadow.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Accordion with rotated chevrons, fill-current, CSS-variable color -->
+  <section class="px-12 py-6" style="--brand: #db2777">
+    <div class="w-[520px] divide-y divide-gray-200 rounded-xl border border-gray-200">
+      <div class="flex items-center justify-between px-5 py-4"><span class="font-medium">Is there a free trial?</span><svg class="h-5 w-5 rotate-180 text-gray-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg></div>
+      <div class="flex items-center justify-between px-5 py-4"><span class="font-medium">Can I cancel anytime?</span><svg class="h-5 w-5 -rotate-90 text-gray-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg></div>
+      <div class="flex items-center justify-between px-5 py-4"><span class="font-medium">Brand-colored icon</span><svg class="h-6 w-6 fill-[var(--brand)]" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg></div>
+    </div>
+  </section>
+
+  <!-- Testimonial with padded ringed avatar and avatar stack -->
+  <section class="flex items-center gap-12 px-12 py-8">
+    <figure class="w-[420px] rounded-2xl bg-gray-50 p-6">
+      <blockquote class="text-gray-700">"We moved our whole design system over in a weekend."</blockquote>
+      <figcaption class="mt-4 flex items-center gap-3">
+        <img class="h-14 w-14 rounded-full bg-white p-1 ring-2 ring-indigo-500 object-cover" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=160&h=160&fit=crop" alt="Leslie">
+        <div><div class="font-semibold">Leslie Alexander</div><div class="text-sm text-gray-500">CTO, Acme</div></div>
+      </figcaption>
+    </figure>
+    <div class="flex -space-x-3">
+      <img class="inline-block h-12 w-12 rounded-full ring-4 ring-white object-cover" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=160&h=160&fit=crop" alt="">
+      <img class="inline-block h-12 w-12 rounded-full ring-4 ring-white object-cover" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=160&h=160&fit=crop" alt="">
+      <img class="inline-block h-12 w-12 rounded-full ring-4 ring-white object-cover grayscale" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=160&h=160&fit=crop" alt="">
+      <span class="inline-flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-sm font-medium text-gray-600 ring-4 ring-white">+8</span>
+    </div>
+  </section>
+
+  <!-- Hero banner with Tailwind arbitrary bg-url, positioned & sized backgrounds -->
+  <section class="grid grid-cols-2 gap-6 px-12 py-8">
+    <div class="h-56 rounded-3xl bg-[url('https://picsum.photos/id/1015/800/500')] bg-cover bg-bottom p-8 text-3xl font-bold text-white">bg-bottom</div>
+    <div class="h-56 rounded-3xl bg-slate-900 bg-[url('https://picsum.photos/id/1025/400/600')] bg-[length:140px_auto] bg-right bg-no-repeat p-8 text-xl font-semibold text-white">bg-[length:140px] bg-right</div>
+    <img class="h-56 w-full rounded-3xl object-cover object-[center_15%]" src="https://picsum.photos/id/1025/400/600" alt="object position arbitrary">
+    <img class="h-56 w-full rounded-3xl object-cover object-bottom" src="https://picsum.photos/id/1015/800/500" alt="object bottom">
+  </section>
+</div>

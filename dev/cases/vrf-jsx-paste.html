@@ -1,0 +1,29 @@
+import { Button } from "@/components/ui/button"
+import { Check } from "lucide-react"
+
+const plans = [
+  { name: "Starter", price: 9, features: ["1 project", "Email support"] },
+  { name: "Pro", price: 29, features: ["Unlimited projects", "Priority support"] },
+]
+
+export default function Pricing() {
+  return (
+    <section className="bg-slate-50 px-6 py-16">
+      <h2 className="text-3xl font-bold text-slate-900 text-center">Simple pricing</h2>
+      <div className="mt-10 grid gap-6 md:grid-cols-2 max-w-3xl mx-auto">
+        {plans.map((p) => (
+          <div key={p.name} className="rounded-2xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+            <h3 className="text-lg font-semibold">{p.name}</h3>
+            <p className="mt-2 text-4xl font-bold">${p.price}<span className="text-sm text-slate-500">/mo</span></p>
+            <ul className="mt-6 space-y-2">
+              {p.features.map((f) => (
+                <li key={f} className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-emerald-500" />{f}</li>
+              ))}
+            </ul>
+            <Button className="mt-8 w-full">Get started</Button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}

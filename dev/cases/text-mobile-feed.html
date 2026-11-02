@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile feed</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, sans-serif; background: #f4f4f5; color: #18181b; }
+  .top { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: #fff; border-bottom: 1px solid #e4e4e7; }
+  .top h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  .top .count { font-size: 12px; font-weight: 600; color: #fff; background: #ef4444; border-radius: 999px; padding: 2px 7px; }
+  .post { margin: 12px; padding: 16px; background: #fff; border-radius: 16px; }
+  .author { display: flex; gap: 10px; align-items: center; }
+  .ava { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg,#f97316,#ec4899); }
+  .name { font-weight: 600; font-size: 15px; }
+  .handle { font-size: 13px; color: #71717a; }
+  .body { margin: 12px 0 0; font-size: 15px; line-height: 1.5; }
+  .body .tag { color: #2563eb; }
+  .verified { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: #3b82f6; vertical-align: -3px; margin-left: 4px; }
+  .badge-inline { display: inline-block; padding: 1px 8px; border-radius: 6px; background: #dcfce7; color: #166534; font-size: 12px; font-weight: 600; }
+  .btn-link { display: inline-flex; align-items: center; gap: 4px; color: #2563eb; font-weight: 600; }
+  .check { display: flex; gap: 10px; margin-top: 12px; font-size: 14px; line-height: 1.45; color: #3f3f46; }
+  .check::before { content: "✓"; color: #16a34a; font-weight: 700; }
+  .row2 { display: flex; gap: 10px; margin-top: 12px; font-size: 14px; line-height: 1.45; color: #3f3f46; }
+  .dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: #a855f7; }
+  .actions { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f4f4f5; font-size: 13px; color: #71717a; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px; }
+  .tile { padding: 14px; border-radius: 14px; background: #fff; text-align: center; }
+  .tile .v { font-size: 24px; font-weight: 700; line-height: 1; }
+  .tile .k { margin-top: 6px; font-size: 12px; color: #71717a; }
+  .space { margin: 12px; font-size: 15px; line-height: 1.5; }
+  .bq { margin: 12px; padding: 12px 16px; border-left: 3px solid #a1a1aa; font-style: italic; color: #52525b; font-size: 15px; line-height: 1.55; }
+  .legal { margin: 16px 12px 32px; font-size: 11px; line-height: 1.4; color: #a1a1aa; text-align: center; }
+</style>
+</head>
+<body>
+  <header class="top"><h1>Notifications</h1><span class="count">12</span></header>
+
+  <article class="post">
+    <div class="author"><div class="ava"></div><div><div class="name">Maya Lindqvist <span class="verified"></span></div><div class="handle">@maya · 2h</div></div></div>
+    <p class="body">Just shipped the new onboarding flow 🎉 Conversion is up <span class="badge-inline">+18%</span> week over week. Huge thanks to the design team for pushing on the copy. <span class="tag">#buildinpublic</span> <a class="btn-link">Read the write-up →</a></p>
+    <div class="check">Everything is measured against last month's cohort and adjusted for seasonality and traffic mix.</div>
+    <div class="row2"><span class="dot"></span>Anonymous flex item text that wraps onto several lines next to a fixed-width dot on the left side.</div>
+    <div class="actions"><span>💬 24</span><span>🔁 8</span><span>❤️ 312</span><span>↗︎ Share</span></div>
+  </article>
+
+  <div class="grid">
+    <div class="tile"><div class="v">4.9★</div><div class="k">Rating</div></div>
+    <div class="tile"><div class="v">1,204</div><div class="k">Reviews this month</div></div>
+  </div>
+
+  <p class="space">Hello <b> world</b> — there is a space both before and inside the bold tag , and <i>an italic</i><b>bold</b> pair with no space. Line<br>break here and<br><br>a blank line.</p>
+
+  <blockquote class="bq">“The best interface is no interface — but when you need one, make it obvious.”</blockquote>
+
+  <p class="legal">By continuing you agree to our <a style="text-decoration:underline">Terms of Service</a> and <a style="text-decoration:underline">Privacy Policy</a>. Standard message and data rates may apply.</p>
+</body>
+</html>

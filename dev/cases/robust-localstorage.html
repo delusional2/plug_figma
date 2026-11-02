@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Habit Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script>
+    // Theme bootstrap copied from the Tailwind docs; runs before paint.
+    if (localStorage.theme === 'dark') document.documentElement.classList.add('dark');
+    window.APP_VERSION = '1.4.0';
+  </script>
+</head>
+<body class="bg-stone-50 text-stone-900">
+  <div class="max-w-xl mx-auto px-6 py-12">
+    <header class="flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight">Habits</h1>
+        <p id="date" class="text-stone-500 mt-1"></p>
+      </div>
+      <div class="flex items-center gap-2 rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-stone-200">
+        <span class="text-orange-500">●</span><span id="streak" class="text-sm font-semibold">0 day streak</span>
+      </div>
+    </header>
+
+    <form id="add" class="mt-8 flex gap-2">
+      <input id="name" class="flex-1 rounded-xl border border-stone-300 bg-white px-4 py-3" placeholder="New habit, e.g. Read 20 pages">
+      <button class="rounded-xl bg-stone-900 px-5 py-3 font-medium text-white">Add</button>
+    </form>
+
+    <ul id="list" class="mt-6 space-y-3"></ul>
+
+    <section class="mt-10 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-stone-200">
+      <h2 class="font-semibold">This week</h2>
+      <div id="week" class="mt-4 grid grid-cols-7 gap-2 text-center text-xs text-stone-500"></div>
+    </section>
+  </div>
+
+  <script>
+    const DEFAULTS = [
+      { name: 'Morning run', done: true, color: 'bg-emerald-500' },
+      { name: 'Read 20 pages', done: false, color: 'bg-sky-500' },
+      { name: 'No sugar', done: true, color: 'bg-rose-500' },
+      { name: 'Meditate 10 min', done: false, color: 'bg-violet-500' },
+    ];
+    // Persist between visits — what nearly every generated "app" does.
+    const habits = JSON.parse(localStorage.getItem('habits') || 'null') || DEFAULTS;
+    const streak = Number(sessionStorage.getItem('streak') || 12);
+
+    document.getElementById('date').textContent = 'Monday, March 10';
+    document.getElementById('streak').textContent = streak + ' day streak';
+    document.getElementById('list').innerHTML = habits.map((h) => `
+      <li class="flex items-center gap-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200">
+        <span class="size-3 rounded-full ${h.color}"></span>
+        <span class="flex-1 font-medium ${h.done ? 'line-through text-stone-400' : ''}">${h.name}</span>
+        <span class="grid size-7 place-items-center rounded-full ${h.done ? 'bg-stone-900 text-white' : 'ring-1 ring-stone-300'} text-sm">${h.done ? '✓' : ''}</span>
+      </li>`).join('');
+    document.getElementById('week').innerHTML = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => `
+      <div><div class="mx-auto mb-1 size-8 rounded-lg ${i < 5 ? 'bg-emerald-400' : 'bg-stone-100'}"></div>${d}</div>`).join('');
+    localStorage.setItem('habits', JSON.stringify(habits));
+  </script>
+</body>
+</html>

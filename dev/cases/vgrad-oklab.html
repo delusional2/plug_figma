@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-white p-8">
+  <div class="grid grid-cols-2 gap-4" style="width:900px">
+    <div id="a" class="h-24 rounded-xl bg-linear-to-r from-blue-500 to-yellow-400"></div>
+    <div id="b" class="h-24 rounded-xl" style="background: linear-gradient(90deg, #3b82f6, #facc15)"></div>
+    <div id="c" class="h-24 rounded-xl bg-linear-45 from-[#ff0080] to-[#00e5ff]"></div>
+    <div id="d" class="h-24 rounded-xl bg-linear-90 from-indigo-500 to-pink-500"></div>
+    <div id="e" class="h-24 rounded-xl bg-linear-to-r from-[#ff0000] to-[#0000ff]"></div>
+    <div id="f" class="h-24 rounded-xl" style="background: linear-gradient(90deg in hsl longer hue, red, red)"></div>
+    <div id="g" class="h-24 rounded-xl" style="background: linear-gradient(90deg, #ff0000, #0000ff)"></div>
+    <div id="h" class="h-24 rounded-xl bg-gradient-to-r from-purple-600 to-blue-500"></div>
+  </div>
+  <pre id="out" class="text-[10px] mt-4 whitespace-pre-wrap" style="width:900px"></pre>
+  <script>
+    setTimeout(()=>{document.getElementById('out').textContent=[...'abcdefgh'].map(i=>i+': '+getComputedStyle(document.getElementById(i)).backgroundImage).join('\n')},800);
+  </script>
+</body></html>

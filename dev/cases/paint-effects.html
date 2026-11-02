@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Effects &amp; colors</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+  .mb { mix-blend-mode: multiply; }
+  .sc { mix-blend-mode: screen; }
+  .ov { mix-blend-mode: overlay; }
+  .bbm { background: url("https://picsum.photos/id/1015/400/240") center / cover, linear-gradient(135deg, #f43f5e, #6366f1); background-blend-mode: multiply; }
+  .ds { filter: drop-shadow(0 10px 8px rgba(0,0,0,.35)); }
+  .gs { filter: grayscale(1); opacity: .6; }
+  .br { filter: brightness(.55); }
+  .sat { filter: saturate(2.2) contrast(1.2); }
+  .hue { filter: hue-rotate(120deg); }
+  .inv { filter: invert(1); }
+  .sw { display: flex; flex-direction: column; justify-content: flex-end; height: 88px; padding: 8px; font-size: 11px; border-radius: 12px; color: #111; }
+</style>
+</head>
+<body class="bg-white p-10 font-sans text-slate-900">
+  <!-- Group opacity on a parent containing overlapping children -->
+  <div class="flex gap-10 mb-10">
+    <div class="relative h-40 w-64 opacity-50">
+      <div class="absolute left-0 top-0 h-28 w-40 rounded-2xl bg-indigo-600"></div>
+      <div class="absolute left-20 top-12 h-28 w-40 rounded-2xl bg-rose-500"></div>
+    </div>
+    <div class="relative h-40 w-64 rounded-3xl bg-amber-100">
+      <div class="absolute left-6 top-6 h-28 w-28 rounded-full bg-cyan-400 mb"></div>
+      <div class="absolute left-20 top-6 h-28 w-28 rounded-full bg-fuchsia-400 mb"></div>
+      <div class="absolute left-14 top-16 h-20 w-20 rounded-full bg-yellow-300 mb"></div>
+    </div>
+    <div class="relative h-40 w-64 rounded-3xl bg-slate-900">
+      <div class="absolute left-6 top-6 h-28 w-28 rounded-full bg-red-600 sc"></div>
+      <div class="absolute left-20 top-6 h-28 w-28 rounded-full bg-green-600 sc"></div>
+      <div class="absolute left-14 top-16 h-20 w-20 rounded-full bg-blue-600 sc"></div>
+    </div>
+    <div class="h-40 w-64 rounded-3xl bbm"></div>
+  </div>
+
+  <!-- CSS filters on images, icons, cards -->
+  <div class="flex items-end gap-8 mb-10">
+    <img class="h-28 w-40 rounded-xl object-cover gs" src="https://picsum.photos/id/1025/320/224" alt="logo">
+    <img class="h-28 w-40 rounded-xl object-cover br" src="https://picsum.photos/id/1025/320/224" alt="dim">
+    <img class="h-28 w-40 rounded-xl object-cover sat" src="https://picsum.photos/id/1025/320/224" alt="sat">
+    <img class="h-28 w-40 rounded-xl object-cover hue" src="https://picsum.photos/id/1025/320/224" alt="hue">
+    <svg class="ds h-24 w-24 text-indigo-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z"/></svg>
+    <div class="ds h-24 w-32 rounded-xl bg-white border border-slate-200"></div>
+    <div class="inv h-24 w-32 rounded-xl bg-amber-200 p-3 text-sm font-semibold">Inverted</div>
+    <div class="drop-shadow-xl h-24 w-32 rounded-xl bg-emerald-400"></div>
+  </div>
+
+  <!-- Modern color syntaxes: Tailwind v4 oklch palette, color-mix opacities, hsl/hwb/lab -->
+  <div class="grid grid-cols-8 gap-3 mb-10">
+    <div class="sw bg-indigo-500 text-white">indigo-500</div>
+    <div class="sw bg-indigo-500/20">indigo/20</div>
+    <div class="sw bg-emerald-400/60">emerald/60</div>
+    <div class="sw" style="background: hsl(280 70% 60%)">hsl</div>
+    <div class="sw" style="background: hwb(30 10% 20%)">hwb</div>
+    <div class="sw" style="background: lab(62% 40 -55)">lab</div>
+    <div class="sw" style="background: color-mix(in srgb, #0ea5e9 35%, #f43f5e)">color-mix</div>
+    <div class="sw" style="background: oklch(0.72 0.28 145)">oklch wide</div>
+  </div>
+
+  <!-- Gradients: Tailwind v4 oklab interpolation, transparent stops, many stops, conic -->
+  <div class="grid grid-cols-4 gap-4 mb-10">
+    <div class="h-24 rounded-xl bg-linear-to-r from-blue-500 to-yellow-400"></div>
+    <div class="h-24 rounded-xl" style="background: linear-gradient(90deg, #3b82f6, #facc15)"></div>
+    <div class="h-24 rounded-xl bg-linear-to-r from-rose-500 via-fuchsia-500 to-transparent"></div>
+    <div class="h-24 rounded-xl" style="background: linear-gradient(90deg in hsl longer hue, red, red)"></div>
+    <div class="h-24 rounded-xl bg-slate-900 p-0"><div class="h-full rounded-xl bg-linear-to-t from-white to-transparent"></div></div>
+    <div class="h-24 rounded-xl" style="background: linear-gradient(90deg, rgba(255,0,0,1), rgba(255,0,0,0) 50%, rgba(0,0,255,1))"></div>
+    <div class="h-24 rounded-xl bg-conic from-red-500 via-yellow-400 to-red-500"></div>
+    <div class="h-24 rounded-xl" style="background: conic-gradient(from 180deg at 25% 50%, #0ea5e9, #a855f7, #0ea5e9)"></div>
+  </div>
+
+  <!-- Donut chart (dashboard staple) -->
+  <div class="flex items-center gap-8">
+    <div class="relative h-40 w-40 rounded-full" style="background: conic-gradient(#6366f1 0 42%, #22c55e 0 70%, #f59e0b 0 88%, #e5e7eb 0);">
+      <div class="absolute inset-5 flex items-center justify-center rounded-full bg-white text-2xl font-bold">42%</div>
+    </div>
+    <div class="h-4 w-80 overflow-hidden rounded-full bg-slate-200">
+      <div class="h-full w-2/3 rounded-full" style="background: repeating-linear-gradient(45deg, #6366f1 0 10px, #818cf8 10px 20px);"></div>
+    </div>
+    <div class="h-40 w-64 rounded-2xl" style="background: repeating-radial-gradient(circle at 50% 50%, #0f172a 0 8px, #1e293b 8px 16px);"></div>
+  </div>
+</body>
+</html>

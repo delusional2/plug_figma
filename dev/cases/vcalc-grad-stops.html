@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>calc stops</title>
+<style>
+  body { margin:0; font-family: Inter, system-ui, sans-serif; background:#f8fafc; color:#0f172a; }
+  .wrap { padding:40px; display:flex; flex-direction:column; gap:24px; }
+  .row { display:flex; gap:24px; }
+  .card { width:320px; height:140px; border-radius:16px; background:#fff; padding:20px; box-sizing:border-box; }
+  .hairline { background: linear-gradient(transparent calc(100% - 1px), #e5e7eb 0); }
+  .hairline-thick { background: linear-gradient(#ffffff calc(100% - 6px), #6366f1 calc(100% - 6px)); }
+  .split { background: linear-gradient(90deg, #f1f5f9 calc(50% - 20px), #0ea5e9 calc(50% - 20px), #0ea5e9 calc(50% + 20px), #f1f5f9 calc(50% + 20px)); }
+  .grid-bg { height:200px; border-radius:16px;
+    background-color:#fff;
+    background-image: linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, transparent calc(100% - 2px), #94a3b8 calc(100% - 2px));
+  }
+  h3 { margin:0; font-size:16px; }
+</style></head>
+<body><div class="wrap">
+  <div class="row">
+    <div class="card hairline"><h3>Bottom hairline</h3></div>
+    <div class="card hairline-thick"><h3>Thick bottom accent</h3></div>
+    <div class="card split"><h3>Center band</h3></div>
+  </div>
+  <div class="grid-bg"></div>
+</div></body></html>

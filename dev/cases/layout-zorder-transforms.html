@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pricing &amp; stacking</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+  <!-- Hero: decorative blob with -z-10 placed AFTER the content, content relative -->
+  <section class="relative isolate overflow-hidden px-6 py-20 text-center">
+    <h1 class="text-4xl font-bold tracking-tight">Simple, transparent pricing</h1>
+    <p class="mt-3 text-slate-600">Start free. Upgrade when you grow.</p>
+    <div class="mt-6 inline-flex rounded-full bg-white p-1 shadow ring-1 ring-slate-200">
+      <button class="rounded-full bg-slate-900 px-4 py-1.5 text-sm font-medium text-white">Monthly</button>
+      <button class="rounded-full px-4 py-1.5 text-sm font-medium text-slate-600">Yearly <span class="ml-1 rounded bg-emerald-100 px-1.5 text-xs text-emerald-700">-20%</span></button>
+    </div>
+    <div class="absolute inset-x-0 top-0 -z-10 h-64 bg-gradient-to-b from-indigo-200 to-transparent"></div>
+  </section>
+
+  <!-- Pricing: featured card uses scale-105 and z-10, with a ribbon badge translated half out of the card -->
+  <section class="mx-auto grid max-w-5xl grid-cols-3 items-center gap-6 px-6 pb-20">
+    <div class="rounded-2xl bg-white p-8 ring-1 ring-slate-200">
+      <h3 class="font-semibold">Hobby</h3>
+      <p class="mt-4 text-4xl font-bold">$0</p>
+      <ul class="mt-6 space-y-2 text-sm text-slate-600"><li>1 site</li><li>Basic analytics</li></ul>
+      <a class="mt-8 block rounded-lg bg-slate-100 py-2 text-center text-sm font-semibold">Get started</a>
+    </div>
+    <div class="relative z-10 scale-105 rounded-2xl bg-indigo-600 p-8 text-white shadow-2xl">
+      <span class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-amber-400 px-3 py-1 text-xs font-bold text-amber-950">Most popular</span>
+      <h3 class="font-semibold">Pro</h3>
+      <p class="mt-4 text-4xl font-bold">$24</p>
+      <ul class="mt-6 space-y-2 text-sm text-indigo-100"><li>10 sites</li><li>Advanced analytics</li><li>Priority support</li></ul>
+      <a class="mt-8 block rounded-lg bg-white py-2 text-center text-sm font-semibold text-indigo-600">Upgrade</a>
+    </div>
+    <div class="rounded-2xl bg-white p-8 ring-1 ring-slate-200">
+      <h3 class="font-semibold">Team</h3>
+      <p class="mt-4 text-4xl font-bold">$79</p>
+      <ul class="mt-6 space-y-2 text-sm text-slate-600"><li>Unlimited sites</li><li>SSO</li></ul>
+      <a class="mt-8 block rounded-lg bg-slate-100 py-2 text-center text-sm font-semibold">Contact us</a>
+    </div>
+  </section>
+
+  <!-- Reversed flex directions + order -->
+  <section class="mx-auto max-w-5xl px-6 pb-16 space-y-6">
+    <div class="flex flex-row-reverse items-center justify-end gap-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
+      <span class="text-sm text-slate-500">row-reverse:</span>
+      <span class="rounded-md bg-sky-100 px-3 py-1 text-sm">First in DOM</span>
+      <span class="rounded-md bg-sky-200 px-3 py-1 text-sm">Second</span>
+      <span class="rounded-md bg-sky-300 px-3 py-1 text-sm">Third</span>
+    </div>
+    <div class="flex items-center gap-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
+      <span class="order-last rounded-md bg-rose-200 px-3 py-1 text-sm">order-last (DOM first)</span>
+      <span class="rounded-md bg-rose-100 px-3 py-1 text-sm">Middle</span>
+      <span class="rounded-md bg-rose-100 px-3 py-1 text-sm">End</span>
+    </div>
+    <!-- Notification bell with count badge pinned top-right -->
+    <div class="flex items-center gap-6">
+      <button class="relative rounded-xl bg-white p-3 ring-1 ring-slate-200">
+        <svg class="h-6 w-6 text-slate-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg>
+        <span class="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white">12</span>
+      </button>
+      <div class="relative h-16 w-16">
+        <div class="absolute inset-0 rotate-45 rounded-lg bg-indigo-500"></div>
+        <span class="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">NEW</span>
+      </div>
+      <div class="h-12 w-40 skew-x-[-12deg] bg-amber-300"></div>
+      <span class="inline-block rotate-90 text-sm font-semibold tracking-widest text-slate-500">SIDE</span>
+    </div>
+  </section>
+
+  <!-- Dashboard panel: fixed-height scrollable list + overlapping z-index tooltip that comes first in DOM -->
+  <section class="mx-auto max-w-5xl px-6 pb-24">
+    <div class="relative grid grid-cols-[1fr_2fr] gap-6">
+      <div class="absolute left-40 top-10 z-20 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-lg">Tooltip above the chart</div>
+      <aside class="h-56 overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200">
+        <div class="border-b border-slate-100 px-4 py-3 text-sm">Inbox</div>
+        <div class="border-b border-slate-100 px-4 py-3 text-sm">Drafts</div>
+        <div class="border-b border-slate-100 px-4 py-3 text-sm">Sent</div>
+        <div class="border-b border-slate-100 px-4 py-3 text-sm">Archive</div>
+        <div class="border-b border-slate-100 px-4 py-3 text-sm">Spam</div>
+        <div class="border-b border-slate-100 px-4 py-3 text-sm">Trash</div>
+        <div class="px-4 py-3 text-sm">Settings</div>
+      </aside>
+      <div class="flex h-56 items-end gap-3 rounded-xl bg-white p-6 ring-1 ring-slate-200">
+        <div class="w-full rounded-t-md bg-indigo-200" style="height:40%"></div>
+        <div class="w-full rounded-t-md bg-indigo-300" style="height:65%"></div>
+        <div class="w-full rounded-t-md bg-indigo-400" style="height:50%"></div>
+        <div class="w-full rounded-t-md bg-indigo-500" style="height:85%"></div>
+        <div class="w-full rounded-t-md bg-indigo-600" style="height:70%"></div>
+        <div class="w-full rounded-t-md bg-indigo-700" style="height:95%"></div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

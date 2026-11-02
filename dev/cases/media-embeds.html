@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Media — embeds, icon fonts, backgrounds</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #fff; }
+  section { padding: 32px 48px; }
+  h2 { margin: 0 0 16px; font-size: 18px; }
+  .row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+  /* hero with background photo + overlay gradient, positioned to top */
+  .hero { height: 380px; display: flex; flex-direction: column; justify-content: flex-end; padding: 48px; color: #fff;
+    background-image: linear-gradient(to top, rgba(15,23,42,.85), rgba(15,23,42,0) 60%), url("https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=1600&q=70");
+    background-size: cover; background-position: center top; }
+  .hero h1 { margin: 0 0 8px; font-size: 44px; }
+  .hero p { margin: 0; font-size: 18px; opacity: .85; }
+  /* tiled pattern + contain illustration in the corner */
+  .pattern { height: 160px; border-radius: 16px; background-color: #eef2ff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='3' cy='3' r='2' fill='%236366f1'/%3E%3C/svg%3E");
+    background-size: 24px 24px; background-repeat: repeat; }
+  .corner { height: 160px; border-radius: 16px; background: #fff7ed url("https://picsum.photos/id/1025/300/300") no-repeat right 16px bottom 16px / 120px 120px; border: 1px solid #fed7aa; padding: 24px; font-weight: 600; }
+  .natural { height: 160px; border-radius: 16px; background: #f0fdf4 url("https://picsum.photos/id/1040/100/60") no-repeat 24px 24px; }
+  /* icon fonts */
+  .fa-row i { font-size: 24px; color: #4f46e5; width: 48px; height: 48px; display: inline-grid; place-items: center; border-radius: 12px; background: #eef2ff; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; background: #0f172a; color: #fff; font-weight: 600; font-size: 14px; }
+  .material-symbols-outlined { font-size: 28px; color: #0f766e; }
+  .ms-filled { font-variation-settings: 'FILL' 1; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: #f0fdfa; font-size: 14px; }
+  /* video / iframe / canvas */
+  .video { width: 420px; aspect-ratio: 16 / 9; border-radius: 16px; object-fit: cover; background: #000; display: block; }
+  .video-noposter { width: 240px; height: 135px; border-radius: 12px; background: #111827; display: block; }
+  .embed { width: 420px; aspect-ratio: 16 / 9; border: 0; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+  .map { width: 300px; height: 200px; border: 2px solid #e2e8f0; border-radius: 12px; }
+  .chart-card { width: 560px; padding: 20px; border-radius: 16px; border: 1px solid #e2e8f0; }
+  .chart-card canvas { width: 100% !important; height: 240px !important; }
+  .spark { width: 160px; height: 48px; border-radius: 8px; background: #f8fafc; }
+</style>
+</head>
+<body>
+  <header class="hero">
+    <h1>Meet the team behind the product</h1>
+    <p>Background photo with gradient overlay, positioned to the top</p>
+  </header>
+
+  <section>
+    <h2>Background images: tile, contain in a corner, natural size</h2>
+    <div class="row" style="display:grid;grid-template-columns:repeat(3,1fr)">
+      <div class="pattern"></div>
+      <div class="corner">Illustration bottom-right</div>
+      <div class="natural"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Font Awesome and Material Symbols</h2>
+    <div class="row fa-row">
+      <i class="fa-solid fa-house"></i>
+      <i class="fa-solid fa-chart-line"></i>
+      <i class="fa-regular fa-bell"></i>
+      <i class="fa-brands fa-github"></i>
+      <span class="btn"><i class="fa-solid fa-download"></i> Download</span>
+      <span class="btn">Next <i class="fa-solid fa-arrow-right"></i></span>
+    </div>
+    <div class="row" style="margin-top:20px">
+      <span class="material-symbols-outlined">home</span>
+      <span class="material-symbols-outlined ms-filled">favorite</span>
+      <span class="material-symbols-outlined">settings</span>
+      <div class="nav-item"><span class="material-symbols-outlined">dashboard</span>Dashboard</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Video, iframe embeds</h2>
+    <div class="row">
+      <video class="video" poster="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=900&q=70" muted playsinline></video>
+      <video class="video-noposter" muted></video>
+      <iframe class="embed" src="https://www.youtube.com/embed/dQw4w9WgXcQ" title="YouTube video" allowfullscreen></iframe>
+      <iframe class="map" src="about:blank" title="Map"></iframe>
+    </div>
+  </section>
+
+  <section>
+    <h2>Canvas charts (Chart.js)</h2>
+    <div class="row">
+      <div class="chart-card"><canvas id="bar"></canvas></div>
+      <canvas class="spark" id="spark" width="160" height="48"></canvas>
+    </div>
+  </section>
+
+  <script>
+    new Chart(document.getElementById('bar'), {
+      type: 'bar',
+      data: { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], datasets: [{ label: 'Signups', data: [12, 19, 8, 15, 22, 30], backgroundColor: '#6366f1', borderRadius: 6 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } } },
+    });
+    const c = document.getElementById('spark').getContext('2d');
+    c.strokeStyle = '#16a34a'; c.lineWidth = 2; c.beginPath();
+    [30, 26, 34, 20, 24, 12, 16, 8].forEach((y, i) => (i ? c.lineTo(i * 22 + 4, y) : c.moveTo(4, y)));
+    c.stroke();
+  </script>
+</body>
+</html>

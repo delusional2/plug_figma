@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wallet app</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+  .pattern { background-color: #4338ca;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='3' cy='3' r='1.5' fill='%23ffffff' fill-opacity='.35'/%3E%3C/svg%3E"); }
+  .gimg { border: 3px solid; border-image: linear-gradient(90deg, #f43f5e, #8b5cf6) 1; }
+  .shimmer { background: linear-gradient(90deg, #64748b 0%, #f8fafc 50%, #64748b 100%); background-size: 200% 100%; background-position: 100% 0;
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .fade-mask { -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent); mask-image: linear-gradient(to bottom, #000 40%, transparent); }
+  .slant { clip-path: polygon(0 0, 100% 0, 100% 78%, 0 100%); }
+  .blob-clip { clip-path: polygon(74% 44%, 100% 61%, 97% 26%, 85% 0%, 80% 2%, 72% 32%, 60% 62%, 52% 68%, 47% 58%, 45% 34%, 27% 76%, 0% 64%, 17% 100%, 27% 76%, 76% 97%, 74% 44%); }
+  .ring-mask { -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 10px)); mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 10px)); }
+  .shiny { background: linear-gradient(180deg, #6366f1, #4338ca); border: 1px solid rgba(255,255,255,.18);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px -4px rgba(67,56,202,.6); }
+</style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-900">
+  <!-- Header with SVG tile pattern + slanted bottom via clip-path -->
+  <header class="pattern slant relative h-56 px-5 pt-10 text-white overflow-hidden">
+    <div class="blob-clip absolute -right-10 -top-6 h-48 w-64 bg-linear-to-tr from-pink-400 to-indigo-300 opacity-40 blur-md"></div>
+    <p class="text-sm text-indigo-200">Total balance</p>
+    <p class="mt-1 text-4xl font-bold tracking-tight">$12,840.22</p>
+    <p class="shimmer mt-2 text-lg font-semibold">Updated just now</p>
+  </header>
+
+  <main class="-mt-8 space-y-4 px-5 pb-28">
+    <!-- Quick actions: SVG icons that carry their own background/padding/ring -->
+    <div class="flex justify-between rounded-2xl bg-white p-4 shadow-sm">
+      <div class="flex flex-col items-center gap-1 text-xs">
+        <svg class="h-12 w-12 rounded-full bg-indigo-100 p-3 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Top up
+      </div>
+      <div class="flex flex-col items-center gap-1 text-xs">
+        <svg class="h-12 w-12 rounded-full bg-emerald-100 p-3 text-emerald-600 ring-2 ring-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Send
+      </div>
+      <div class="flex flex-col items-center gap-1 text-xs">
+        <svg class="h-12 w-12 rounded-xl border-2 border-amber-300 bg-amber-50 p-3 text-amber-600 shadow-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v10H4zM4 11h16"/></svg>Cards
+      </div>
+      <div class="flex flex-col items-center gap-1 text-xs">
+        <div class="ring-mask h-12 w-12 rounded-full" style="background: conic-gradient(#22c55e 0 72%, #e2e8f0 0)"></div>72%
+      </div>
+    </div>
+
+    <!-- Card with gradient border-image -->
+    <div class="gimg bg-white p-4">
+      <p class="text-sm font-semibold">Premium plan</p>
+      <p class="text-xs text-slate-500">border-image: linear-gradient(…) 1</p>
+    </div>
+
+    <!-- Image card with gradient overlay and fade mask -->
+    <div class="relative h-48 overflow-hidden rounded-2xl">
+      <img class="h-full w-full object-cover" src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=60" alt="trip">
+      <div class="absolute inset-0 bg-linear-to-t from-black/70 via-black/10 to-transparent"></div>
+      <p class="absolute bottom-4 left-4 text-lg font-semibold text-white">Trip to Iceland</p>
+    </div>
+
+    <!-- Transaction list fading out with mask-image -->
+    <ul class="fade-mask divide-y divide-slate-200 rounded-2xl bg-white">
+      <li class="flex items-center justify-between p-4"><span class="text-sm">Spotify</span><span class="text-sm font-semibold">-$9.99</span></li>
+      <li class="flex items-center justify-between p-4"><span class="text-sm">Salary</span><span class="text-sm font-semibold text-emerald-600">+$4,200</span></li>
+      <li class="flex items-center justify-between p-4"><span class="text-sm">Coffee</span><span class="text-sm font-semibold">-$4.50</span></li>
+      <li class="flex items-center justify-between p-4"><span class="text-sm">Uber</span><span class="text-sm font-semibold">-$18.20</span></li>
+    </ul>
+
+    <button class="shiny w-full rounded-xl py-3 text-sm font-semibold text-white">Add money</button>
+  </main>
+
+  <nav class="fixed inset-x-0 bottom-0 flex justify-around border-t border-black/5 bg-white/70 py-4 text-xs backdrop-blur-xl">
+    <span class="font-semibold text-indigo-600">Home</span><span>Cards</span><span>Stats</span><span>Profile</span>
+  </nav>
+</body>
+</html>

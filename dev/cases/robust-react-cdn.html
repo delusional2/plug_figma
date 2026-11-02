@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Task Board</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body class="bg-gray-100">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const COLUMNS = [
+      { id: 'todo', title: 'To do', color: 'bg-sky-500' },
+      { id: 'doing', title: 'In progress', color: 'bg-amber-500' },
+      { id: 'done', title: 'Done', color: 'bg-emerald-500' },
+    ];
+
+    // Simulates the fetch() every generated app does on mount.
+    function fakeFetch() {
+      return new Promise((resolve) => setTimeout(() => resolve([
+        { id: 1, col: 'todo', title: 'Design onboarding flow', tag: 'Design', due: 'Mar 12', avatar: 'https://picsum.photos/seed/a1/48/48' },
+        { id: 2, col: 'todo', title: 'Write API docs for billing endpoints', tag: 'Docs', due: 'Mar 14', avatar: 'https://picsum.photos/seed/a2/48/48' },
+        { id: 3, col: 'todo', title: 'Fix login redirect loop on Safari', tag: 'Bug', due: 'Mar 9', avatar: 'https://picsum.photos/seed/a3/48/48' },
+        { id: 4, col: 'doing', title: 'Migrate charts to new design tokens', tag: 'Frontend', due: 'Mar 18', avatar: 'https://picsum.photos/seed/a4/48/48' },
+        { id: 5, col: 'doing', title: 'Load testing for v2 search', tag: 'Backend', due: 'Mar 20', avatar: 'https://picsum.photos/seed/a5/48/48' },
+        { id: 6, col: 'done', title: 'Set up error monitoring', tag: 'Infra', due: 'Mar 2', avatar: 'https://picsum.photos/seed/a6/48/48' },
+        { id: 7, col: 'done', title: 'Pricing page copy review', tag: 'Marketing', due: 'Mar 1', avatar: 'https://picsum.photos/seed/a7/48/48' },
+      ]), 900));
+    }
+
+    function Skeleton() {
+      return (
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-xl bg-gray-200 animate-pulse" />)}
+        </div>
+      );
+    }
+
+    function Card({ task }) {
+      return (
+        <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700">{task.tag}</span>
+            <img src={task.avatar} alt="" className="w-6 h-6 rounded-full" />
+          </div>
+          <p className="mt-3 text-sm font-medium text-gray-900">{task.title}</p>
+          <p className="mt-2 text-xs text-gray-500">Due {task.due}</p>
+        </div>
+      );
+    }
+
+    function App() {
+      const [tasks, setTasks] = useState(null);
+      useEffect(() => { fakeFetch().then(setTasks); }, []);
+      return (
+        <div className="min-h-screen">
+          <nav className="bg-white border-b border-gray-200">
+            <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+              <span className="text-lg font-bold text-gray-900">Sprint 14</span>
+              <button className="rounded-lg bg-gray-900 text-white text-sm font-medium px-4 py-2">New task</button>
+            </div>
+          </nav>
+          <main className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-3 gap-6">
+            {COLUMNS.map((c) => (
+              <section key={c.id} className="rounded-2xl bg-gray-50 p-4">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-4">
+                  <span className={`w-2 h-2 rounded-full ${c.color}`}></span>{c.title}
+                  {tasks && <span className="ml-auto text-gray-400">{tasks.filter((t) => t.col === c.id).length}</span>}
+                </h2>
+                {tasks ? (
+                  <div className="space-y-3">{tasks.filter((t) => t.col === c.id).map((t) => <Card key={t.id} task={t} />)}</div>
+                ) : <Skeleton />}
+              </section>
+            ))}
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
