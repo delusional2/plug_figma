@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Пример лендинга</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: #1a1530; background: #faf8ff; }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 64px; border-bottom: 1px solid #ebe6f7; background: #fff; }
+  .logo { font-weight: 800; font-size: 20px; }
+  .links { display: flex; gap: 32px; color: #5b5675; font-size: 15px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 999px; font-weight: 600; font-size: 15px; border: 0; color: #fff; background: linear-gradient(135deg, #7b5cff, #c25cff); box-shadow: 0 8px 24px rgba(123, 92, 255, .35); }
+  .btn.ghost { color: #1a1530; background: #fff; border: 1px solid #ddd6f3; box-shadow: none; }
+  .hero { display: flex; flex-direction: column; align-items: center; padding: 96px 64px 72px; text-align: center; }
+  .badge { padding: 6px 14px; border-radius: 999px; background: #efe9ff; color: #6a4cf0; font-size: 13px; font-weight: 600; }
+  h1 { margin: 24px 0 16px; font-size: 64px; line-height: 1.05; letter-spacing: -0.03em; max-width: 820px; }
+  h1 span { background: linear-gradient(90deg, #7b5cff, #ff5ca8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { max-width: 560px; margin: 0 0 32px; font-size: 18px; line-height: 28px; color: #5b5675; }
+  .actions { display: flex; gap: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 0 64px 96px; }
+  .card { padding: 28px; border-radius: 20px; background: #fff; border: 1px solid #ebe6f7; box-shadow: 0 1px 2px rgba(26, 21, 48, .06); }
+  .icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: #efe9ff; color: #6a4cf0; }
+  .card h3 { margin: 18px 0 8px; font-size: 18px; }
+  .card p { margin: 0; color: #5b5675; line-height: 1.6; }
+  .signup { display: flex; gap: 12px; justify-content: center; padding-bottom: 96px; }
+  .signup input { width: 320px; padding: 12px 16px; border-radius: 12px; border: 1px solid #ddd6f3; font: inherit; }
+  .shot { display: block; width: calc(100% - 128px); margin: 0 64px 96px; height: 360px; object-fit: cover; border-radius: 24px; }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="logo">plug·figma</div>
+    <div class="links"><a>Возможности</a><a>Цены</a><a>Блог</a></div>
+    <button class="btn">Попробовать</button>
+  </nav>
+
+  <section class="hero">
+    <div class="badge">Новое · версия 1.0</div>
+    <h1>Из HTML в <span>редактируемые слои</span></h1>
+    <p class="lead">Вставь код страницы — плагин отрисует его в браузере и соберёт фреймы, тексты, картинки и Auto Layout.</p>
+    <div class="actions">
+      <button class="btn">Импортировать <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      <button class="btn ghost">Как это работает</button>
+    </div>
+  </section>
+
+  <section class="cards">
+    <div class="card">
+      <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="4"/></svg></div>
+      <h3>Фреймы</h3>
+      <p>Фоны, градиенты, рамки, скругления и тени переносятся как есть.</p>
+    </div>
+    <div class="card">
+      <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg></div>
+      <h3>Текст</h3>
+      <p>Шрифты подбираются из доступных в Figma, <b>жирный</b> и <i>курсив</i> внутри абзаца сохраняются.</p>
+    </div>
+    <div class="card">
+      <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg></div>
+      <h3>Auto Layout</h3>
+      <p>Там, где элементы стоят ровной стопкой или строкой, включается Auto Layout.</p>
+    </div>
+  </section>
+
+  <img class="shot" src="https://picsum.photos/seed/plugfigma/1200/600" alt="картинка">
+
+  <form class="signup" onsubmit="return false">
+    <input type="email" placeholder="you@example.com">
+    <button class="btn">Подписаться</button>
+  </form>
+</body>
+</html>
