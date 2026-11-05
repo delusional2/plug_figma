@@ -1586,7 +1586,8 @@ async function imageBytesInner(url, el, outer, setSlow) {
   const onOuter = () => ac.abort();
   if (outer) { if (outer.aborted) ac.abort(); else outer.addEventListener('abort', onOuter, { once: true }); }
   try {
-    const res = await (_fetch || fetch)(url, { signal: ac.signal });
+    // no-store: never queue behind the page's own in-flight <img> request for the same URL (cache lock).
+    const res = await (_fetch || fetch)(url, { signal: ac.signal, cache: 'no-store' });
     if (res.ok) blob = await res.blob(); // the body read is covered by the same signal
   } catch (e) {
     if (e && e.name === 'AbortError') setSlow(true); // otherwise CORS or offline

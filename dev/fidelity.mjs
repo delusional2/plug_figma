@@ -48,8 +48,10 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const BASE = `http://127.0.0.1:${server.address().port}`;
 
 // ---------- chrome ----------
+// --disable-quic: on networks that drop UDP, QUIC to image CDNs (picsum/fastly) hangs fetches from
+// the opaque-origin stage for 10s+ instead of failing over, which made image results flaky.
 const profile = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'h2f-chrome-'));
-const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--hide-scrollbars', '--force-device-scale-factor=1', '--font-render-hinting=none', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--hide-scrollbars', '--force-device-scale-factor=1', '--font-render-hinting=none', '--disable-quic', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 const wsUrl = await new Promise((resolve, reject) => {
   let buf = '';
   chrome.stderr.on('data', (d) => { buf += d; const m = /ws:\/\/[^\s]+/.exec(buf); if (m) resolve(m[0]); });
