@@ -1,0 +1,254 @@
+{
+"American Typewriter": [
+"Bold",
+"Condensed",
+"Condensed Bold",
+"Condensed Light",
+"Light",
+"Regular",
+"Semibold"
+],
+"Andale Mono": [
+"Regular"
+],
+"Apple Color Emoji": [
+"Regular"
+],
+"Arial": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Arial Black": [
+"Regular"
+],
+"Arial Narrow": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Arial Rounded MT Bold": [
+"Regular"
+],
+"Avenir": [
+"Black",
+"Black Oblique",
+"Book",
+"Book Oblique",
+"Heavy",
+"Heavy Oblique",
+"Light",
+"Light Oblique",
+"Medium",
+"Medium Oblique",
+"Oblique",
+"Roman"
+],
+"Avenir Next": [
+"Bold",
+"Bold Italic",
+"Demi Bold",
+"Demi Bold Italic",
+"Heavy",
+"Heavy Italic",
+"Italic",
+"Medium",
+"Medium Italic",
+"Regular",
+"Ultra Light",
+"Ultra Light Italic"
+],
+"Baskerville": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular",
+"SemiBold",
+"SemiBold Italic"
+],
+"Big Caslon": [
+"Medium"
+],
+"Brush Script MT": [
+"Italic"
+],
+"Charter": [
+"Black",
+"Black Italic",
+"Bold",
+"Bold Italic",
+"Italic",
+"Roman"
+],
+"Cochin": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Comic Sans MS": [
+"Bold",
+"Regular"
+],
+"Copperplate": [
+"Bold",
+"Light",
+"Regular"
+],
+"Courier": [
+"Bold",
+"Bold Oblique",
+"Oblique",
+"Regular"
+],
+"Courier New": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Didot": [
+"Bold",
+"Italic",
+"Regular"
+],
+"Futura": [
+"Bold",
+"Condensed ExtraBold",
+"Condensed Medium",
+"Medium",
+"Medium Italic"
+],
+"Geneva": [
+"Regular"
+],
+"Georgia": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Gill Sans": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Light",
+"Light Italic",
+"Regular",
+"SemiBold",
+"SemiBold Italic",
+"UltraBold"
+],
+"Helvetica": [
+"Bold",
+"Bold Oblique",
+"Light",
+"Light Oblique",
+"Oblique",
+"Regular"
+],
+"Helvetica Neue": [
+"Bold",
+"Bold Italic",
+"Condensed Black",
+"Condensed Bold",
+"Italic",
+"Light",
+"Light Italic",
+"Medium",
+"Medium Italic",
+"Regular",
+"Thin",
+"Thin Italic",
+"UltraLight",
+"UltraLight Italic"
+],
+"Hoefler Text": [
+"Black",
+"Black Italic",
+"Italic",
+"Ornaments",
+"Regular"
+],
+"Impact": [
+"Regular"
+],
+"Lucida Grande": [
+"Bold",
+"Regular"
+],
+"Menlo": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Monaco": [
+"Regular"
+],
+"Optima": [
+"Bold",
+"Bold Italic",
+"ExtraBlack",
+"Italic",
+"Regular"
+],
+"PT Mono": [
+"Bold",
+"Regular"
+],
+"PT Sans": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"PT Serif": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Palatino": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Rockwell": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Tahoma": [
+"Bold",
+"Regular"
+],
+"Times": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Times New Roman": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Trebuchet MS": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+],
+"Verdana": [
+"Bold",
+"Bold Italic",
+"Italic",
+"Regular"
+]
+}
