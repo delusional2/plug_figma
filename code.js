@@ -44,6 +44,9 @@ async function importDocument(doc) {
   const root = buildNode(doc.root, page, ctx);
   if (!root) throw new Error('Не получилось создать слои');
   root.name = doc.name;
+  if (doc.root.fixedCount) {
+    try { root.numberOfFixedChildren = doc.root.fixedCount; } catch (e) {}
+  }
 
   // Put the import to the right of whatever is already on the page.
   if (others.length) {

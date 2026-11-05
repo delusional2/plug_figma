@@ -66,6 +66,7 @@ class Frame extends Node {
   set primaryAxisSizingMode(v) { oneOf(v, ['FIXED', 'AUTO'], 'primaryAxisSizingMode'); }
   set counterAxisSizingMode(v) { oneOf(v, ['FIXED', 'AUTO'], 'counterAxisSizingMode'); }
   set itemSpacing(v) { num(v, 'itemSpacing'); }
+  set numberOfFixedChildren(v) { if (!(Number.isInteger(v) && v >= 0 && v <= this.children.length)) fail('numberOfFixedChildren ' + v); }
   set itemReverseZIndex(v) { if (typeof v !== 'boolean') fail('itemReverseZIndex'); if (this._lm === 'NONE') fail('itemReverseZIndex without layout'); }
   set paddingTop(v) { num(v, 'pad'); if (v < 0) fail('neg pad'); } set paddingRight(v) { num(v, 'pad'); if (v < 0) fail('neg pad'); }
   set paddingBottom(v) { num(v, 'pad'); if (v < 0) fail('neg pad'); } set paddingLeft(v) { num(v, 'pad'); if (v < 0) fail('neg pad'); }

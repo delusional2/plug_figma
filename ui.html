@@ -840,6 +840,7 @@ function extract(opts) {
   S.deco = new Map();
   S.paint = new WeakMap();
   S.icons = new WeakMap();
+  S.fixed = [];
   const d = S.doc;
   const body = d.body;
   const W = opts.width;
@@ -861,8 +862,17 @@ function extract(opts) {
 
   const title = (d.title || '').trim() || 'HTML';
   const root = { type: 'FRAME', name: `${title} · ${W}px`, x: 0, y: 0, w: W, h: H, fills, clip: true, children: paintOrder(children) };
+  setConstraints(root);
   tryAutoLayout(root, bodyCS);
   finalizeOrder(root);
+  // position:fixed bars and buttons: on top, the last children (Figma's fixed-on-scroll slots).
+  if (S.fixed.length) {
+    if (root.layout && root.layout.reverseZ) root.children = S.fixed.slice().reverse().concat(root.children);
+    else {
+      root.children = root.children.concat(S.fixed);
+      root.fixedCount = S.fixed.length;
+    }
+  }
   return root;
 }
 
@@ -924,6 +934,9 @@ function walk(el, ox, oy) {
       else el.setAttribute('style', saved);
     }
   }
+  if (out.length && el.nodeType === 1 && css(el).position === 'fixed') {
+    try { if (hoistFixed(el, out, ox, oy)) return []; } catch (e) {}
+  }
   // Paint layer of what this element produced, for the parent's ordering (paintOrder).
   if (out.length && el.nodeType === 1) {
     const cs = css(el);
@@ -939,6 +952,53 @@ function walk(el, ox, oy) {
     }
   }
   return out;
+}
+
+// position:fixed against the viewport (no transformed/filtered/contained ancestor): taken
+// out of its parent to the page frame, pinned like the browser shows it at scroll 0
+// (bottom bars and FABs at the page bottom, as in a full-page screenshot).
+function hoistFixed(el, out, ox, oy) {
+  for (let a = el.parentElement; a && a !== S.doc.documentElement; a = a.parentElement) {
+    const c = css(a);
+    if (c.transform !== 'none' || c.filter !== 'none' || (c.perspective && c.perspective !== 'none') || (c.backdropFilter && c.backdropFilter !== 'none')
+      || /paint|layout|strict|content/.test(c.contain || '') || /transform|filter|perspective/.test(c.willChange || '')) return false;
+  }
+  const r = el.getBoundingClientRect();
+  const VH = S.opts.height || S.win.innerHeight, W = S.opts.width, H = docHeight();
+  const topGap = r.top, botGap = VH - r.bottom;
+  let dy = 0, cv = 'MIN';
+  if (botGap < topGap - 1 && r.height < VH * 0.6) { dy = H - VH; cv = 'MAX'; }
+  else if (topGap <= 1 && botGap <= 1) cv = 'STRETCH';
+  const lg = r.left, rg = W - r.right;
+  const ch = lg <= 1 && rg <= 1 ? 'STRETCH' : Math.abs(lg - rg) <= 1 ? 'CENTER' : rg < lg ? 'MAX' : 'MIN';
+  for (const n of out) {
+    n.x = r2(n.x + ox);
+    n.y = r2(n.y + oy + dy);
+    if (n.xf) { n.xf.tx = r2(n.xf.tx + ox); n.xf.ty = r2(n.xf.ty + oy + dy); }
+    n.absolute = true;
+    n.cons = { h: ch, v: cv };
+    delete n.cssPos;
+    S.fixed.push(n);
+  }
+  return true;
+}
+
+// Constraints of absolute children: from which offsets CSS set, else from geometry.
+function setConstraints(f) {
+  for (const k of f.children || []) {
+    if (!k.absolute || k.cons) { delete k.cssPos; continue; }
+    const p = k.cssPos || {};
+    const axis = (lo, hi, a, size, total) => {
+      const g0 = a, g1 = total - a - size;
+      if (lo && hi) return 'STRETCH';
+      if (hi) return 'MAX';
+      if (Math.abs(g0 - g1) <= 1 && g0 > 1) return 'CENTER';
+      if (lo) return 'MIN';
+      return g0 <= 1 && g1 <= 1 ? 'STRETCH' : g1 < g0 ? 'MAX' : 'MIN';
+    };
+    k.cons = { h: axis(p.l, p.r, k.x, k.w, f.w), v: axis(p.t, p.b, k.y, k.h, f.h) };
+    delete k.cssPos;
+  }
 }
 
 // The element's 2D transform (translate, rotate, scale properties, then transform) about
@@ -1320,6 +1380,7 @@ function walkEl(el, ox, oy) {
     absolute: cs.position === 'absolute' || cs.position === 'fixed',
     opacity: opacity < 1 ? r2(opacity) : undefined,
   };
+  if (common.absolute) common.cssPos = { l: cs.left !== 'auto', r: cs.right !== 'auto', t: cs.top !== 'auto', b: cs.bottom !== 'auto' };
   const leaf = (node) => (node && box.w > 0 && box.h > 0 ? [Object.assign(node, common)] : []);
 
   switch (tag) {
@@ -1490,9 +1551,10 @@ function frameNode(el, box, visual, common, children) {
   const f = {
     type: 'FRAME', name: nameFor(el), ...box,
     fills: visual.fills, stroke, radii: visual.radii, effects: visual.effects, clip: visual.clip,
-    absolute: common.absolute, opacity: common.opacity, children: pre.concat(children),
+    absolute: common.absolute, opacity: common.opacity, cssPos: common.cssPos, children: pre.concat(children),
   };
   try { fixSpread(f); } catch (e) {}
+  try { setConstraints(f); } catch (e) {}
   return f;
 }
 

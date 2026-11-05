@@ -157,7 +157,25 @@ async function original(caseFile, tabs) {
         cv.replaceWith(img); await img.decode().catch(() => {});
       } catch (e) { /* tainted canvas: leave it */ }
     }
-    return Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+    // Like the plugin (and a Figma frame with fixed-on-scroll children): bottom-pinned fixed
+    // bars and buttons sit at the page bottom, not where the first viewport ends.
+    const full = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+    const VH = innerHeight;
+    if (full > VH + 1) for (const el of document.querySelectorAll('body *')) {
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed') continue;
+      let free = true;
+      for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+        const c = getComputedStyle(a);
+        if (c.transform !== 'none' || c.filter !== 'none' || (c.perspective && c.perspective !== 'none') || (c.backdropFilter && c.backdropFilter !== 'none') || /paint|layout|strict|content/.test(c.contain || '') || /transform|filter|perspective/.test(c.willChange || '')) { free = false; break; }
+      }
+      const r = el.getBoundingClientRect();
+      if (!free || !(VH - r.bottom < r.top - 1 && r.height < VH * 0.6)) continue;
+      el.style.setProperty('top', (r.top + full - VH) + 'px', 'important');
+      el.style.setProperty('bottom', 'auto', 'important');
+      el.style.setProperty('height', r.height + 'px', 'important');
+    }
+    return full;
   })()`);
   const png = await p.shot(width, h);
   await p.close();
