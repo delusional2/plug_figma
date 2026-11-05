@@ -66,6 +66,9 @@ ws.addEventListener('message', (e) => {
   const m = JSON.parse(e.data);
   if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(new Error(m.error.message)) : p.resolve(m.result); }
   else listeners.forEach((l) => l(m));
+  // H2F_DEBUG=1: page console + exceptions on stderr (which tab is stuck, and where).
+  if (process.env.H2F_DEBUG && m.method === 'Runtime.consoleAPICalled') process.stderr.write(`  [console ${m.sessionId.slice(0, 6)}] ${m.params.args.map((a) => a.value !== undefined ? a.value : a.description).join(' ')}\n`);
+  if (process.env.H2F_DEBUG && m.method === 'Runtime.exceptionThrown') process.stderr.write(`  [exception ${m.sessionId.slice(0, 6)}] ${(m.params.exceptionDetails.exception || {}).description || m.params.exceptionDetails.text}\n`);
 });
 const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
   const id = ++msgId;
@@ -75,9 +78,9 @@ const send = (method, params = {}, sessionId) => new Promise((resolve, reject) =
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Every tab a case opens is registered in its `tabs` set, so a timed-out case can be torn down.
-async function newPage(w, h, tabs) {
+async function newPage(w, h, tabs, contextId) {
   // Own window per tab: parallel background tabs don't paint reliably (tiled screenshots).
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank', newWindow: true, background: false, browserContextId: tabs && tabs.contextId });
+  const { targetId } = await send('Target.createTarget', { url: 'about:blank', newWindow: true, background: false, browserContextId: contextId || (tabs && tabs.contextId) });
   if (tabs) tabs.add(targetId);
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
   const s = (m, p) => send(m, p, sessionId);
@@ -122,7 +125,9 @@ async function waitFor(page, expr, ms = 150000, alive = () => true) {
 const { prepareHtml } = new Function(/<script>\n([\s\S]*?)<\/script>/.exec(fs.readFileSync(path.join(ROOT, 'ui.html'), 'utf8'))[1] + '\n;return { prepareHtml };')();
 
 async function original(caseFile, tabs) {
-  const p = await newPage(width, height, tabs);
+  // Its own browser context: the original's <img> loads must not share an HTTP cache (and its
+  // per-URL cache locks) with the extraction stage, which never happens in Figma.
+  const p = await newPage(width, height, tabs, tabs.origContextId);
   // Same preparation as the plugin (JSX build, CSP strip, Tailwind injection, env shim), minus the agent.
   const html = prepareHtml(fs.readFileSync(path.join(ROOT, 'dev', 'cases', caseFile), 'utf8'), { agent: false }).html;
   const tmpName = `_orig_${width}_${caseFile}`;
@@ -149,7 +154,11 @@ async function original(caseFile, tabs) {
 async function extract(caseFile, tabs) {
   const p = await newPage(width, height, tabs);
   await p.goto(`${BASE}/dev/runner.html?case=${encodeURIComponent('cases/' + caseFile)}&w=${width}&h=${height}`);
-  const json = await waitFor(p, 'window.__result', caseTimeout * 1000, () => tabs.size > 0);
+  const len = await waitFor(p, 'window.__result ? window.__result.length : 0', caseTimeout * 1000, () => tabs.size > 0);
+  // Read in slices: a raw photo re-encoded at 4096px is 20MB+ of base64, more than one
+  // DevTools message carries (the reply never arrives and the case looked hung).
+  let json = '';
+  for (let i = 0; i < len; i += 4e6) json += await p.eval(`window.__result.slice(${i}, ${i + 4e6})`);
   await p.close();
   return JSON.parse(json);
 }
@@ -223,7 +232,9 @@ try {
       try {
         // Each case in its own browser context: its own renderer process and HTTP cache,
         // so a hung or heavy page (or a cache lock on a slow image) can't stall the others.
-        ctx.tabs.contextId = (await send('Target.createBrowserContext', {})).browserContextId;
+        const mkContext = () => Promise.race([send('Target.createBrowserContext', {}), sleep(15000).then(() => { throw new Error('browser did not create a context'); })]);
+        ctx.tabs.contextId = (await mkContext()).browserContextId;
+        ctx.tabs.origContextId = (await mkContext()).browserContextId;
         results.push(await Promise.race([
           runCase.call(ctx, c),
           new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`case timed out after ${caseTimeout}s in ${ctx.phase}`)), caseTimeout * 1000); }),
@@ -238,7 +249,9 @@ try {
         ctx.tabs.clear();
         // A hung page may never answer closeTarget: don't let teardown block the worker.
         await Promise.race([Promise.all(left.map((targetId) => send('Target.closeTarget', { targetId }).catch(() => {}))), sleep(5000)]);
-        if (ctx.tabs.contextId) await Promise.race([send('Target.disposeBrowserContext', { browserContextId: ctx.tabs.contextId }).catch(() => {}), sleep(5000)]);
+        for (const browserContextId of [ctx.tabs.contextId, ctx.tabs.origContextId]) {
+          if (browserContextId) await Promise.race([send('Target.disposeBrowserContext', { browserContextId }).catch(() => {}), sleep(5000)]);
+        }
       }
     }
   };
