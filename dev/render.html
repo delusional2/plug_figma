@@ -208,20 +208,40 @@ window.renderTree = async (json) => {
   }
   document.body.innerHTML = '';
   // Figma ships every Google Font, so load the families the tree asks for.
-  const fams = new Set();
+  // Google rejects a whole css2 request when one axis range or tuple doesn't
+  // exist for the family, so try a fallback chain per family (fetched, not <link>).
+  const used = new Map(); // family -> Set of "ital,wght"
   (function walk(n) {
-    if (n.segments) for (const s of n.segments) for (const f of s.font.families) fams.add(f);
+    if (n.segments) for (const s of n.segments) {
+      const t = (s.font.italic ? 1 : 0) + ',' + Math.min(1000, Math.max(1, Math.round(s.font.weight || 400)));
+      for (const f of s.font.families) { if (!used.has(f)) used.set(f, new Set()); used.get(f).add(t); }
+    }
     (n.children || []).forEach(walk);
   })(doc.root);
   const generic = /^(serif|sans-serif|monospace|system-ui|cursive|fantasy|ui-[\w-]+|-apple-system|blinkmacsystemfont|segoe ui|arial|helvetica|helvetica neue|times new roman|georgia|menlo|monaco|consolas|courier new|apple color emoji|segoe ui emoji|noto color emoji)$/i;
-  const links = [...fams].filter((f) => !generic.test(f)).map((f) => new Promise((r) => {
-    const l = document.createElement('link');
-    l.rel = 'stylesheet';
-    l.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(f)}:ital,wght@0,100..900;1,100..900&display=block`;
-    l.onload = l.onerror = r;
-    document.head.appendChild(l);
-  }));
-  await Promise.race([Promise.all(links), new Promise((r) => setTimeout(r, 5000))]);
+  const G = 'https://fonts.googleapis.com/css2?display=block&family=';
+  const get = (q) => fetch(G + q).then((r) => (r.ok ? r.text() : Promise.reject(r.status)));
+  window.__missingFonts = [];
+  async function loadFamily(f) {
+    const e = encodeURIComponent(f);
+    const tuples = [...used.get(f)];
+    const css = [];
+    for (const q of [e + ':ital,wght@0,100..900;1,100..900', e + ':wght@100..900']) {
+      try { css.push(await get(q)); break; } catch (_) {}
+    }
+    // Static families, or italics missing from the range request: each tuple on its own.
+    if (!css.length || tuples.some((t) => t[0] === '1')) {
+      const r = await Promise.allSettled(tuples.map((t) => get(e + ':ital,wght@' + t)));
+      r.forEach((x) => { if (x.status === 'fulfilled') css.push(x.value); });
+    }
+    if (!css.length) { try { css.push(await get(e)); } catch (_) {} }
+    if (!css.length) { window.__missingFonts.push(f); return; }
+    const st = document.createElement('style');
+    st.textContent = css.join('\n');
+    document.head.appendChild(st);
+  }
+  const links = [...used.keys()].filter((f) => !generic.test(f)).map((f) => loadFamily(f).catch(() => {}));
+  await Promise.race([Promise.all(links), new Promise((r) => setTimeout(r, 8000))]);
   build(doc.root, null, images);
   await document.fonts.ready;
   await Promise.all([...document.querySelectorAll('.layer')].map((d) => {
