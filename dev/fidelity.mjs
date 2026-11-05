@@ -146,6 +146,17 @@ async function original(caseFile, tabs) {
     // Remote image hosts throttle after many runs: never wait for them forever.
     for (const t0 = performance.now(); performance.now() - t0 < 20000 && [...document.images].some(i => !i.complete);) await new Promise(r => setTimeout(r, 100));
     await new Promise(r => setTimeout(r, 400));
+    // captureBeyondViewport resizes the viewport, and responsive canvas libraries (Chart.js)
+    // clear and re-animate on resize: freeze each canvas as an <img> of what it shows now.
+    for (const cv of document.querySelectorAll('canvas')) {
+      try {
+        const r = cv.getBoundingClientRect(); if (!r.width || !r.height) continue;
+        const img = new Image(); img.src = cv.toDataURL();
+        for (const k of ['display', 'position', 'top', 'left', 'right', 'bottom', 'margin', 'borderRadius', 'transform', 'zIndex', 'opacity']) img.style[k] = getComputedStyle(cv)[k];
+        img.style.width = r.width + 'px'; img.style.height = r.height + 'px'; img.style.maxWidth = 'none'; img.style.boxSizing = 'border-box';
+        cv.replaceWith(img); await img.decode().catch(() => {});
+      } catch (e) { /* tainted canvas: leave it */ }
+    }
     return Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
   })()`);
   const png = await p.shot(width, h);
