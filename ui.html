@@ -258,6 +258,7 @@ addEventListener('message', async (e) => {
     await settle();
 
     send({ kind: 'progress', text: 'Разбираю вёрстку…' });
+    try { materializePseudos(); } catch (err) { console.warn('html-to-figma: pseudo-elements skipped', err); }
     const root = extract(opts);
     const list = [...S.images.values()];
     if (list.length) await loadImages(list, (i, n) => send({ kind: 'progress', text: `Загружаю картинки ${i}/${n}…` }));
@@ -347,11 +348,377 @@ function css(el, pseudo) {
   return c;
 }
 
+// ---------- ::before / ::after ----------
+// Pseudo-elements have no DOM node and no rect, so they are turned into real
+// elements with the same computed style once the layout is final. In-flow ones
+// go into the host (a host whose layout moved because of that — :last-child,
+// sibling selectors — is reverted); absolute ones go into a proxy outside <body>
+// placed over their containing block, and walk() picks them up for the host.
+
+const PSEUDO_TAG = 'h2f-pseudo';
+const NO_PSEUDO_TAGS = new Set(['IMG', 'SVG', 'VIDEO', 'CANVAS', 'IFRAME', 'TEXTAREA', 'SELECT', 'OBJECT', 'EMBED', 'AUDIO', 'BR', 'HR', 'PICTURE']);
+
+function fmtCounter(n, style) {
+  const alpha = (k, base) => { let s = ''; for (; k > 0; k = Math.floor((k - 1) / 26)) s = String.fromCharCode(base + ((k - 1) % 26)) + s; return s; };
+  const roman = (k) => {
+    if (k <= 0 || k >= 4000) return String(k);
+    const t = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
+    let s = '';
+    for (const [v, r] of t) while (k >= v) { s += r; k -= v; }
+    return s;
+  };
+  switch (style) {
+    case 'none': return '';
+    case 'disc': return '•';
+    case 'circle': return '◦';
+    case 'square': return '▪';
+    case 'disclosure-open': return '▾';
+    case 'disclosure-closed': return '▸';
+    case 'decimal-leading-zero': return (n < 0 ? '-' : '') + (Math.abs(n) < 10 ? '0' : '') + Math.abs(n);
+    case 'lower-roman': return roman(n);
+    case 'upper-roman': return roman(n).toUpperCase();
+    case 'lower-alpha': case 'lower-latin': return n > 0 ? alpha(n, 97) : String(n);
+    case 'upper-alpha': case 'upper-latin': return n > 0 ? alpha(n, 65) : String(n);
+    case 'lower-greek': return n > 0 && n <= 24 ? 'αβγδεζηθικλμνξοπρστυφχψω'[n - 1] : String(n);
+    default: return String(n);
+  }
+}
+
+// "a 1 b 2" -> [[a, 1], [b, 2]]
+function counterPairs(v, dflt) {
+  const out = [];
+  if (!v || v === 'none') return out;
+  const t = v.trim().split(/\s+/);
+  for (let i = 0; i < t.length; i++) {
+    if (/^-?\d+$/.test(t[i])) continue;
+    const n = i + 1 < t.length && /^-?\d+$/.test(t[i + 1]) ? parseInt(t[i + 1], 10) : dflt;
+    out.push([t[i], n]);
+  }
+  return out;
+}
+
+// Splits a computed `content` value into tokens: strings, functions, keywords.
+function contentTokens(v) {
+  const out = [];
+  let i = 0;
+  while (i < v.length) {
+    const ch = v[i];
+    if (ch === '"' || ch === "'") {
+      let s = '';
+      i++;
+      while (i < v.length && v[i] !== ch) {
+        if (v[i] === '\\') {
+          const hex = /^[0-9a-fA-F]{1,6} ?/.exec(v.slice(i + 1, i + 8));
+          if (hex) { s += String.fromCodePoint(parseInt(hex[0], 16) || 0xfffd); i += 1 + hex[0].length; }
+          else { s += v[i + 1] || ''; i += 2; }
+        } else s += v[i++];
+      }
+      i++;
+      out.push({ str: s });
+    } else if (ch === '/') {
+      break; // alt text for screen readers
+    } else if (/\s/.test(ch)) {
+      i++;
+    } else {
+      const m = /^([\w-]+)(\()?/.exec(v.slice(i));
+      if (!m) { i++; continue; }
+      if (m[2]) {
+        let depth = 0, j = i;
+        for (; j < v.length; j++) {
+          if (v[j] === '(') depth++;
+          else if (v[j] === ')' && --depth === 0) break;
+        }
+        out.push({ fn: m[1], args: v.slice(i + m[0].length, j) });
+        i = j + 1;
+      } else {
+        out.push({ kw: m[1] });
+        i += m[0].length;
+      }
+    }
+  }
+  return out;
+}
+
+function isStackingContext(cs, parentCs) {
+  const pos = cs.position !== 'static';
+  const zSet = cs.zIndex !== 'auto';
+  return (pos && zSet) || cs.position === 'fixed' || cs.position === 'sticky'
+    || (zSet && parentCs && /flex|grid/.test(parentCs.display))
+    || parseFloat(cs.opacity) < 1 || cs.transform !== 'none' || cs.filter !== 'none'
+    || (cs.backdropFilter && cs.backdropFilter !== 'none') || cs.isolation === 'isolate'
+    || cs.mixBlendMode !== 'normal' || (cs.clipPath && cs.clipPath !== 'none')
+    || /paint|layout|strict|content/.test(cs.contain || '') || /transform|opacity|filter/.test(cs.willChange || '');
+}
+
+// A z-index:-1 decoration paints under the backgrounds of its non-stacking
+// ancestors; when one of them is painted the browser shows nothing of it.
+function negZHidden(el) {
+  for (let a = el; a && a !== S.doc.documentElement; a = a.parentElement) {
+    const cs = getComputedStyle(a);
+    if (isStackingContext(cs, a.parentElement ? getComputedStyle(a.parentElement) : null)) return false;
+    const c = parseColor(cs.backgroundColor);
+    if ((c && c.a > 0) || cs.backgroundImage !== 'none') return true;
+  }
+  return false;
+}
+
+function materializePseudos() {
+  const d = S.doc;
+  if (!d.body) return;
+  S.pseudo = new WeakMap();
+  const recs = [];
+  // Counters in document order (counter-reset scopes end with the parent).
+  const stacks = new Map();
+  const inst = (name) => { const s = stacks.get(name); return s && s.length ? s[s.length - 1] : null; };
+  const applyCounters = (cs, owned, isLi) => {
+    for (const [n, v] of counterPairs(cs.counterReset, 0)) { const c = { v }; if (!stacks.has(n)) stacks.set(n, []); stacks.get(n).push(c); owned.push(n); }
+    for (const [n, v] of counterPairs(cs.counterSet, 0)) { const c = inst(n); if (c) c.v = v; }
+    const incs = counterPairs(cs.counterIncrement, 1);
+    if (isLi && !incs.some((p) => p[0] === 'list-item')) incs.push(['list-item', 1]);
+    for (const [n, v] of incs) {
+      let c = inst(n);
+      if (!c) { c = { v: 0 }; if (!stacks.has(n)) stacks.set(n, []); stacks.get(n).push(c); owned.push(n); }
+      c.v += v;
+    }
+  };
+  const counterText = (fn, args) => {
+    const a = splitTop(args).map((s) => s.trim());
+    if (fn === 'counter') { const c = inst(a[0]); return fmtCounter(c ? c.v : 0, a[1] || 'decimal'); }
+    const s = stacks.get(a[0]) || [];
+    const sep = contentTokens(a[1] || '""')[0];
+    const vals = s.length ? s.map((c) => fmtCounter(c.v, a[2] || 'decimal')) : [fmtCounter(0, a[2] || 'decimal')];
+    return vals.join(sep && sep.str != null ? sep.str : '');
+  };
+  let quoteDepth = 0;
+  const readPseudo = (el, p) => {
+    let pcs;
+    try { pcs = getComputedStyle(el, p); } catch (e) { return null; }
+    const content = pcs.content;
+    if (!content || content === 'none' || content === 'normal' || pcs.display === 'none') return null;
+    const owned = [];
+    applyCounters(pcs, owned, false);
+    const parts = [];
+    const quotes = (pcs.quotes && pcs.quotes !== 'auto' && pcs.quotes !== 'none') ? contentTokens(pcs.quotes).map((t) => t.str || '') : ['“', '”', '‘', '’'];
+    for (const t of contentTokens(content)) {
+      if (t.str != null) parts.push({ text: t.str });
+      else if (t.fn === 'attr') parts.push({ text: el.getAttribute(t.args.trim().split(/\s+/)[0]) || '' });
+      else if (t.fn === 'counter' || t.fn === 'counters') parts.push({ text: counterText(t.fn, t.args) });
+      else if (t.fn === 'url') { const u = contentTokens(t.args)[0]; parts.push({ img: u && u.str != null ? u.str : t.args.trim() }); }
+      else if (t.kw === 'open-quote') { const q = quotes[Math.min(quoteDepth, (quotes.length >> 1) - 1) * 2] || ''; quoteDepth++; parts.push({ text: q }); }
+      else if (t.kw === 'close-quote') { quoteDepth = Math.max(0, quoteDepth - 1); parts.push({ text: quotes[Math.min(quoteDepth, (quotes.length >> 1) - 1) * 2 + 1] || '' }); }
+    }
+    for (const n of owned) stacks.get(n).pop(); // a pseudo's own reset ends with it
+    const decl = [];
+    for (let i = 0; i < pcs.length; i++) {
+      const k = pcs[i];
+      if (k === 'content' || k.startsWith('--')) continue;
+      decl.push([k, pcs.getPropertyValue(k)]);
+    }
+    return { el, p, pcs, parts, decl, oof: pcs.position === 'absolute' || pcs.position === 'fixed', z: pcs.zIndex === 'auto' ? 0 : parseInt(pcs.zIndex, 10) || 0 };
+  };
+  (function visit(el) {
+    const owned = [];
+    const tag = el.tagName.toUpperCase();
+    if (SKIP_TAGS.has(tag) || el.namespaceURI !== 'http://www.w3.org/1999/xhtml') return owned;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none') return owned;
+    applyCounters(cs, owned, /list-item/.test(cs.display));
+    const canHost = !NO_PSEUDO_TAGS.has(tag) && el !== d.body.parentNode;
+    const b = canHost ? readPseudo(el, '::before') : null;
+    if (b) recs.push(b);
+    const childOwned = [];
+    for (const c of el.children) for (const n of visit(c)) childOwned.push(n);
+    for (const n of childOwned) stacks.get(n).pop();
+    const a = canHost ? readPseudo(el, '::after') : null;
+    if (a) recs.push(a);
+    return owned;
+  })(d.body);
+  if (!recs.length) return;
+
+  const style = d.createElement('style');
+  style.textContent = '[data-h2f-b]::before{content:none!important}[data-h2f-a]::after{content:none!important}' + PSEUDO_TAG + '{display:inline}';
+  (d.head || d.documentElement).appendChild(style);
+
+  const build = (r) => {
+    const s = d.createElement(PSEUDO_TAG);
+    s.setAttribute('data-h2f-pseudo', r.el.tagName.toLowerCase() + r.p);
+    s.style.cssText = r.decl.map(([k, v]) => `${k}:${v} !important`).join(';');
+    for (const part of r.parts) {
+      if (part.text) s.appendChild(d.createTextNode(part.text));
+      else if (part.img) { const im = d.createElement('img'); im.src = part.img; im.style.cssText = 'all:initial!important'; s.appendChild(im); }
+    }
+    return s;
+  };
+  const mark = (r, on) => {
+    const at = r.p === '::before' ? 'data-h2f-b' : 'data-h2f-a';
+    if (on) r.el.setAttribute(at, ''); else r.el.removeAttribute(at);
+  };
+
+  // In-flow: into the host, then check that nothing around it moved.
+  const inflow = recs.filter((r) => !r.oof && r.el.tagName !== 'INPUT');
+  const hosts = new Map();
+  for (const r of inflow) {
+    if (!hosts.has(r.el)) {
+      const watch = [r.el, r.el.parentElement].concat([...r.el.children]).filter(Boolean);
+      hosts.set(r.el, { recs: [], watch, rects: watch.map((w) => w.getBoundingClientRect()) });
+    }
+    hosts.get(r.el).recs.push(r);
+  }
+  for (const [el, h] of hosts) {
+    for (const r of h.recs) {
+      r.span = build(r);
+      if (r.p === '::before') el.insertBefore(r.span, el.firstChild);
+      else el.appendChild(r.span);
+      mark(r, true);
+    }
+  }
+  const moved = (a, b) => Math.abs(a.left - b.left) > 0.5 || Math.abs(a.top - b.top) > 0.5 || Math.abs(a.width - b.width) > 0.5 || Math.abs(a.height - b.height) > 0.5;
+  for (let pass = 0; pass < 3; pass++) {
+    let reverted = 0;
+    for (const [el, h] of hosts) {
+      if (h.watch.some((w, i) => moved(w.getBoundingClientRect(), h.rects[i]))) {
+        for (const r of h.recs) { r.span.remove(); mark(r, false); }
+        hosts.delete(el);
+        reverted++;
+      }
+    }
+    if (!reverted) break;
+  }
+
+  // Out-of-flow: a proxy over the containing block's padding box, inside one
+  // fixed layer at the viewport origin (the page is scrolled to the top), so
+  // that it never adds to the document's scroll height.
+  const layer = d.createElement(PSEUDO_TAG);
+  layer.setAttribute('data-h2f-proxy', '');
+  layer.style.cssText = 'all:initial!important;position:fixed!important;left:0!important;top:0!important;width:0!important;height:0!important;display:block!important;pointer-events:none!important;z-index:2147483647!important';
+  d.documentElement.appendChild(layer);
+  for (const r of recs) {
+    if (!r.oof) continue;
+    try {
+      if (r.z < 0 && negZHidden(r.el)) continue;
+      let cbBox;
+      if (r.pcs.position === 'fixed') {
+        cbBox = { x: 0, y: 0, w: S.win.innerWidth, h: S.win.innerHeight };
+      } else {
+        let cb = r.el;
+        for (; cb && cb !== d.body; cb = cb.parentElement) {
+          const c = getComputedStyle(cb);
+          if (c.position !== 'static' || c.transform !== 'none' || c.filter !== 'none' || /paint|layout|strict|content/.test(c.contain || '')) break;
+        }
+        if (!cb || cb === d.body) cb = d.documentElement;
+        const c = getComputedStyle(cb);
+        const rc = cb.getBoundingClientRect();
+        const bl = parseFloat(c.borderLeftWidth) || 0, bt = parseFloat(c.borderTopWidth) || 0;
+        cbBox = cb === d.documentElement
+          ? { x: 0, y: 0, w: S.win.innerWidth, h: S.win.innerHeight }
+          : { x: rc.left + bl, y: rc.top + bt, w: cb.clientWidth || (rc.width - bl - (parseFloat(c.borderRightWidth) || 0)), h: cb.clientHeight || (rc.height - bt - (parseFloat(c.borderBottomWidth) || 0)) };
+      }
+      const proxy = d.createElement(PSEUDO_TAG);
+      proxy.style.cssText = `all:initial!important;position:absolute!important;display:block!important;pointer-events:none!important;left:${cbBox.x}px!important;top:${cbBox.y}px!important;width:${cbBox.w}px!important;height:${cbBox.h}px!important`;
+      const span = build(r);
+      if (r.pcs.position === 'fixed') span.style.setProperty('position', 'absolute', 'important');
+      proxy.appendChild(span);
+      layer.appendChild(proxy);
+      mark(r, true);
+      r.span = span;
+      const e = S.pseudo.get(r.el) || { before: [], after: [] };
+      e[r.p === '::before' ? 'before' : 'after'].push(span);
+      S.pseudo.set(r.el, e);
+    } catch (e) {
+      console.warn('html-to-figma: skipped a pseudo-element', e);
+    }
+  }
+}
+
+// Layers of the out-of-flow pseudo-elements of el (see materializePseudos).
+function pseudoLayers(el, ox, oy) {
+  const e = S.pseudo && S.pseudo.get(el);
+  if (!e) return null;
+  const run = (list) => {
+    const out = [];
+    for (const s of list) {
+      try { for (const n of walk(s, ox, oy)) { n.absolute = true; out.push(n); } } catch (err) { console.warn('html-to-figma: skipped a pseudo-element', err); }
+    }
+    return out;
+  };
+  const before = run(e.before), after = run(e.after);
+  return before.length || after.length ? { before, after } : null;
+}
+
+// ---------- icon fonts ----------
+// Icon fonts (Font Awesome, Material Symbols, Bootstrap Icons…) aren't in Figma:
+// a PUA glyph would become tofu and a ligature ("home") a plain word. The glyph
+// is drawn with the page's own webfont onto a canvas at 3x instead.
+
+const ICON_FAM = /material (icons|symbols)|font ?awesome|bootstrap-icons|remixicon|ionicons|feather|phosphor|tabler|boxicons|line ?awesome|icomoon|glyphicons|fontello|themify|simple-line-icons|lucide|codicon|dashicons|octicons|typicons|entypo|unicons|uicons|icofont|iconfont|fa-solid|fa-regular|fa-brands/i;
+const PUA_ONLY = /^[\s\uE000-\uF8FF\u{F0000}-\u{10FFFD}]+$/u;
+const FA_MODIFIER = /^fa-(solid|regular|brands|light|thin|duotone|sharp|fw|xs|sm|lg|xl|2xs|2xl|\dx|spin|pulse|beat|fade|bounce|shake|border|inverse|pull-\w+|rotate-\d+|flip-\w+|stack(-\dx)?)$/;
+
+// { text, holder, fcs } when el shows nothing but one icon glyph (or ligature word).
+function iconInfo(el) {
+  if (!S.opts.images) return null;
+  if (S.icons.has(el)) return S.icons.get(el);
+  let res = null;
+  try {
+    const text = (el.textContent || '').trim();
+    if (text && text.length <= 40 && !el.querySelector('img,svg,video,canvas,input,textarea,select,iframe')) {
+      const w = S.doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let tn, holder = null, ok = true;
+      while ((tn = w.nextNode())) {
+        if (!/\S/.test(tn.data)) continue;
+        if (holder && holder !== tn.parentElement) { ok = false; break; }
+        holder = tn.parentElement;
+      }
+      if (ok && holder) {
+        const fcs = css(holder);
+        const fam = parseFamilies(fcs.fontFamily)[0] || '';
+        if (PUA_ONLY.test(text) || (ICON_FAM.test(fam) && /^[\w-]+$/.test(text))) res = { text, holder, fcs };
+      }
+    }
+  } catch (e) {}
+  S.icons.set(el, res);
+  return res;
+}
+
+function iconGlyph(el, rect, box, ox, oy, visual) {
+  const info = iconInfo(el);
+  if (!info) return null;
+  const range = S.doc.createRange();
+  range.selectNodeContents(info.holder);
+  const rr = range.getBoundingClientRect();
+  if (!(rr.width > 0.5 && rr.height > 0.5)) return null;
+  const fcs = info.fcs;
+  const k = 3;
+  const c = S.doc.createElement('canvas');
+  c.width = Math.ceil(rr.width * k);
+  c.height = Math.ceil(rr.height * k);
+  const ctx = c.getContext('2d');
+  ctx.scale(k, k);
+  ctx.font = `${fcs.fontStyle} ${fcs.fontWeight} ${fcs.fontSize} ${fcs.fontFamily}`;
+  ctx.fillStyle = fcs.webkitTextFillColor && parseColor(fcs.webkitTextFillColor) ? fcs.webkitTextFillColor : fcs.color;
+  ctx.textBaseline = 'alphabetic';
+  const m = ctx.measureText(info.text);
+  const A = m.fontBoundingBoxAscent || parseFloat(fcs.fontSize) * 0.8;
+  const D = m.fontBoundingBoxDescent || parseFloat(fcs.fontSize) * 0.2;
+  ctx.fillText(info.text, (rr.width - m.width) / 2, (rr.height - (A + D)) / 2 + A);
+  const cls = (el.getAttribute('class') || info.holder.getAttribute('class') || '').trim().split(/\s+/).filter((x) => /-/.test(x) && !FA_MODIFIER.test(x));
+  const label = /^[\w-]+$/.test(info.text) ? info.text : cls.length ? cls[cls.length - 1] : 'glyph';
+  const icon = {
+    type: 'RECT', name: `icon · ${label}`.slice(0, 60), x: r2(rr.left - ox), y: r2(rr.top - oy), w: r2(rr.width), h: r2(rr.height),
+    fills: [{ type: 'IMAGE', ref: imageRef(c.toDataURL('image/png'), null), scaleMode: 'FILL' }],
+  };
+  if (!visual.has && !visual.clip) return icon;
+  shift(icon, rect.left - ox, rect.top - oy);
+  return frameNode(el, box, visual, {}, [icon]);
+}
+
 function extract(opts) {
   S.opts = opts;
   S.images = new Map();
   S.css = new WeakMap();
   S.deco = new Map();
+  S.paint = new WeakMap();
+  S.icons = new WeakMap();
   const d = S.doc;
   const body = d.body;
   const W = opts.width;
@@ -372,7 +739,7 @@ function extract(opts) {
   if (!fills.length) fills = [solid({ r: 1, g: 1, b: 1, a: 1 })];
 
   const title = (d.title || '').trim() || 'HTML';
-  const root = { type: 'FRAME', name: `${title} · ${W}px`, x: 0, y: 0, w: W, h: H, fills, clip: true, children };
+  const root = { type: 'FRAME', name: `${title} · ${W}px`, x: 0, y: 0, w: W, h: H, fills, clip: true, children: paintOrder(children) };
   tryAutoLayout(root, bodyCS);
   return root;
 }
@@ -399,6 +766,50 @@ function childrenOf(el, ox, oy) {
 // Returns the layers for one element (0, 1 or several when a wrapper is lifted),
 // positioned relative to (ox, oy) — the parent layer's top-left in page coordinates.
 function walk(el, ox, oy) {
+  const out = walkEl(el, ox, oy);
+  // Paint layer of what this element produced, for the parent's ordering (paintOrder).
+  if (out.length && el.nodeType === 1) {
+    const cs = css(el);
+    const pos = cs.position !== 'static';
+    const zSet = cs.zIndex !== 'auto';
+    const flexItem = zSet && el.parentElement && /flex|grid/.test(css(el.parentElement).display);
+    if (pos || flexItem) {
+      const z = zSet ? parseInt(cs.zIndex, 10) || 0 : 0;
+      for (const n of out) S.paint.set(n, { z, pos: true });
+    }
+  }
+  return out;
+}
+
+// CSS paint order inside one stacking level: negative z, in-flow non-positioned,
+// positioned (z auto/0) in tree order, then positive z. In-flow layers keep
+// their DOM order (Auto Layout depends on it); only absolute ones move freely.
+function paintOrder(kids) {
+  if (kids.length < 2) return kids;
+  const key = (k) => {
+    const p = S.paint.get(k);
+    if (!p) return 0;
+    return p.z < 0 ? -1e6 + p.z : p.z > 0 ? 1e6 + p.z : 1;
+  };
+  const keys = kids.map(key);
+  if (keys.every((k, i) => i === 0 || k >= keys[i - 1])) return kids;
+  const idx = kids.map((k, i) => i).sort((a, b) => keys[a] - keys[b] || a - b);
+  const sorted = idx.map((i) => kids[i]);
+  const flowOf = (list) => list.filter((k) => !k.absolute);
+  const f0 = flowOf(kids), f1 = flowOf(sorted);
+  if (f0.every((k, i) => k === f1[i])) return sorted;
+  // Keep in-flow layers in DOM order; place absolute ones by their own key.
+  const neg = [], pos = [], mid = [];
+  kids.forEach((k, i) => {
+    if (k.absolute && keys[i] < 0) neg.push(i);
+    else if (k.absolute && keys[i] > 1) pos.push(i);
+    else mid.push(i);
+  });
+  const by = (a, b) => keys[a] - keys[b] || a - b;
+  return neg.sort(by).concat(mid, pos.sort(by)).map((i) => kids[i]);
+}
+
+function walkEl(el, ox, oy) {
   const tag = el.tagName.toUpperCase();
   if (SKIP_TAGS.has(tag) || tag === 'BR') return [];
   const cs = css(el);
@@ -430,25 +841,31 @@ function walk(el, ox, oy) {
 
   const visual = boxVisual(el, cs, box);
 
+  const icon = iconGlyph(el, rect, box, ox, oy, visual);
+  if (icon) return [Object.assign(icon, common)];
+
   if (isTextBlock(el)) {
     const painted = S.inlinePaint;
     const t = blockText(el, cs, painted);
     if (Array.isArray(t)) {
       // A wrapping inline element split into first line + rest.
       t.forEach((k) => { shift(k, ox, oy); Object.assign(k, common); });
-      return t;
+      const pl = pseudoLayers(el, ox, oy);
+      return pl ? pl.before.concat(t, pl.after) : t;
     }
     if (t) {
       const boxes = painted ? inlineBoxes(painted) : [];
       const clipped = visual.clip && t.overflowsBox;
       delete t.overflowsBox;
-      if (!visual.has && !clipped && !boxes.length) {
+      const pl = pseudoLayers(el, rect.left, rect.top);
+      if (!visual.has && !clipped && !boxes.length && !pl) {
         shift(t, ox, oy);
         return [Object.assign(t, common)];
       }
       shift(t, rect.left, rect.top);
       boxes.forEach((b) => shift(b, rect.left, rect.top));
-      const f = frameNode(el, box, visual, common, boxes.concat([t]));
+      const kids = pl ? pl.before.concat(boxes, [t], pl.after) : boxes.concat([t]);
+      const f = frameNode(el, box, visual, common, paintOrder(kids));
       tryAutoLayout(f, cs);
       return [f];
     }
@@ -457,16 +874,21 @@ function walk(el, ox, oy) {
   // A collapsed wrapper (e.g. a 0×0 positioned container): lift its children.
   if (box.w < 0.5 || box.h < 0.5) {
     if (visual.clip) return [];
-    const kids = childrenOf(el, ox, oy);
+    let kids = childrenOf(el, ox, oy);
+    const pl = pseudoLayers(el, ox, oy);
+    if (pl) kids = pl.before.concat(kids, pl.after);
     if (common.absolute) kids.forEach((k) => { k.absolute = true; });
-    return kids;
+    return paintOrder(kids);
   }
 
-  const kids = childrenOf(el, rect.left, rect.top);
+  let kids = childrenOf(el, rect.left, rect.top);
+  const pl = pseudoLayers(el, rect.left, rect.top);
+  if (pl) kids = pl.before.concat(kids, pl.after);
+  kids = paintOrder(kids);
   const overflows = kids.some((k) => k.x < -0.5 || k.y < -0.5 || k.x + k.w > box.w + 0.5 || k.y + k.h > box.h + 0.5);
   const plain = !visual.has && !(visual.clip && overflows) && common.opacity === undefined;
   if (plain && !kids.length) return [];
-  if (plain && kids.length === 1) {
+  if (plain && kids.length === 1 && !pl) {
     // A wrapper that draws nothing adds no information — keep just its child.
     const k = kids[0];
     k.x = r2(k.x + box.x);
@@ -537,6 +959,8 @@ function frameNode(el, box, visual, common, children) {
 }
 
 function nameFor(el) {
+  const pseudo = el.getAttribute('data-h2f-pseudo');
+  if (pseudo) return pseudo;
   const tag = el.tagName.toLowerCase();
   const label = el.getAttribute('aria-label') || el.id;
   if (label) return `${tag} · ${label}`.slice(0, 60);
@@ -820,6 +1244,7 @@ function isTextBlock(el) {
       const tag = c.tagName.toUpperCase();
       if (SKIP_TAGS.has(tag) || tag === 'BR') continue;
       if (ATOMIC_TAGS.has(tag)) return false;
+      if (iconInfo(c)) return false;
       const ccs = css(c);
       if (ccs.display === 'none' || hiddenByEngine(c, ccs)) continue;
       if (ccs.display !== 'inline' && ccs.display !== 'contents' && !plainInlineBlock(c, ccs)) return false;
