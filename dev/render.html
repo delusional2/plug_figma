@@ -119,6 +119,7 @@ function build(n, parent, images) {
     el.style.top = n.y + 'px';
   }
   if (typeof n.opacity === 'number') el.style.opacity = n.opacity;
+  if (parent && parent.layout && parent.layout.reverseZ) el.style.zIndex = String(1000 - (parent.zi = (parent.zi || 0) + 1));
 
   if (n.type === 'TEXT') {
     el.style.whiteSpace = n.autoResize === 'WIDTH_AND_HEIGHT' ? 'pre' : 'pre-wrap';

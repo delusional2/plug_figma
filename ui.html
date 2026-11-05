@@ -862,6 +862,7 @@ function extract(opts) {
   const title = (d.title || '').trim() || 'HTML';
   const root = { type: 'FRAME', name: `${title} · ${W}px`, x: 0, y: 0, w: W, h: H, fills, clip: true, children: paintOrder(children) };
   tryAutoLayout(root, bodyCS);
+  finalizeOrder(root);
   return root;
 }
 
@@ -906,7 +907,10 @@ function walk(el, ox, oy) {
     const pos = cs.position !== 'static';
     const zSet = cs.zIndex !== 'auto';
     const flexItem = zSet && el.parentElement && /flex|grid/.test(css(el.parentElement).display);
-    if (pos || flexItem) {
+    // opacity, transforms, filters… paint with the positioned layer even when static.
+    const layer = pos || flexItem || parseFloat(cs.opacity) < 1 || cs.transform !== 'none' || cs.filter !== 'none'
+      || cs.isolation === 'isolate' || (cs.mixBlendMode && cs.mixBlendMode !== 'normal') || (cs.clipPath && cs.clipPath !== 'none');
+    if (layer) {
       const z = zSet ? parseInt(cs.zIndex, 10) || 0 : 0;
       for (const n of out) S.paint.set(n, { z, pos: true });
     }
@@ -1129,13 +1133,37 @@ function outlineNode(el, ox, oy) {
 // CSS paint order inside one stacking level: negative z, in-flow non-positioned,
 // positioned (z auto/0) in tree order, then positive z. In-flow layers keep
 // their DOM order (Auto Layout depends on it); only absolute ones move freely.
+function paintKey(k) {
+  const p = S.paint.get(k);
+  if (!p) return 0;
+  return p.z < 0 ? -1e6 + p.z : p.z > 0 ? 1e6 + p.z : 1;
+}
+
+// After Auto Layout detection: a frame without it can take the full CSS paint order;
+// one with it keeps its flow order, but when CSS paints the in-flow layers exactly
+// back to front (a positioned header over the next section), Figma can reverse the stacking.
+function finalizeOrder(f) {
+  const kids = f.children;
+  if (!kids || kids.length < 2) return;
+  const keys = kids.map(paintKey);
+  if (keys.every((k, i) => i === 0 || k >= keys[i - 1])) return;
+  const sorted = kids.map((k, i) => i).sort((a, b) => keys[a] - keys[b] || a - b).map((i) => kids[i]);
+  if (!f.layout) {
+    f.children = sorted;
+    return;
+  }
+  // With reversed stacking the first layer is on top: list = paint order reversed,
+  // which keeps the flow order only when CSS paints the flow layers back to front.
+  const flow = kids.filter((k) => !k.absolute), sflow = sorted.filter((k) => !k.absolute);
+  if (flow.length > 1 && sflow.every((k, i) => k === flow[flow.length - 1 - i])) {
+    f.layout.reverseZ = true;
+    f.children = sorted.reverse();
+  }
+}
+
 function paintOrder(kids) {
   if (kids.length < 2) return kids;
-  const key = (k) => {
-    const p = S.paint.get(k);
-    if (!p) return 0;
-    return p.z < 0 ? -1e6 + p.z : p.z > 0 ? 1e6 + p.z : 1;
-  };
+  const key = paintKey;
   const keys = kids.map(key);
   if (keys.every((k, i) => i === 0 || k >= keys[i - 1])) return kids;
   const idx = kids.map((k, i) => i).sort((a, b) => keys[a] - keys[b] || a - b);
@@ -1224,6 +1252,7 @@ function walkEl(el, ox, oy) {
       const kids = pl ? pl.before.concat(boxes, [t], pl.after) : boxes.concat([t]);
       const f = frameNode(el, box, visual, common, paintOrder(kids));
       tryAutoLayout(f, cs);
+      finalizeOrder(f);
       return [f];
     }
   }
@@ -1266,6 +1295,7 @@ function walkEl(el, ox, oy) {
     return [f];
   }
   tryAutoLayout(f, cs);
+  finalizeOrder(f);
   return [f];
 }
 

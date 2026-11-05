@@ -170,6 +170,9 @@ function applyLayout(node, n) {
   node.paddingLeft = l.pl;
   node.primaryAxisAlignItems = l.primaryAlign;
   node.counterAxisAlignItems = l.counterAlign;
+  if (l.reverseZ) {
+    try { node.itemReverseZIndex = true; } catch (e) {}
+  }
   node.resize(Math.max(0.01, n.w), Math.max(0.01, n.h));
 }
 
