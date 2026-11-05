@@ -186,10 +186,12 @@ function build(n, parent, images) {
     return;
   }
 
-  // FRAME / RECT
+  // FRAME / RECT / ELLIPSE / VECTOR
   el.style.width = n.w + 'px';
   el.style.height = n.h + 'px';
   if (n.radii) el.style.borderRadius = `${n.radii.tl}px ${n.radii.tr}px ${n.radii.br}px ${n.radii.bl}px`;
+  if (n.type === 'ELLIPSE') el.style.borderRadius = '50%';
+  if (n.type === 'VECTOR') el.style.clipPath = `path(${n.rule === 'EVENODD' ? 'evenodd, ' : ''}'${n.d}')`;
   const fx = shadows(n.effects);
   if (fx.boxShadow) el.style.boxShadow = fx.boxShadow;
   if (fx.filter) el.style.filter = fx.filter;
@@ -207,6 +209,11 @@ function build(n, parent, images) {
     s.style.borderStyle = n.stroke.dash ? (n.stroke.dash[0] === n.stroke.dash[1] ? 'dotted' : 'dashed') : 'solid';
     s.style.borderColor = cssPaint(n.stroke.paint);
     s.style.borderWidth = `${w.t}px ${w.r}px ${w.b}px ${w.l}px`;
+    if (n.type === 'ELLIPSE') s.style.borderRadius = '50%';
+    if (n.stroke.align === 'OUTSIDE') {
+      s.style.inset = `${-w.t}px ${-w.r}px ${-w.b}px ${-w.l}px`;
+      if (n.radii) s.style.borderRadius = `${n.radii.tl + w.t}px ${n.radii.tr + w.t}px ${n.radii.br + w.t}px ${n.radii.bl + w.t}px`;
+    }
     s.style.zIndex = 1;
     el.appendChild(s);
   }

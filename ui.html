@@ -888,6 +888,12 @@ function childrenOf(el, ox, oy) {
 // positioned relative to (ox, oy) — the parent layer's top-left in page coordinates.
 function walk(el, ox, oy) {
   const out = walkEl(el, ox, oy);
+  if (out.length && el.nodeType === 1) {
+    try {
+      const o = outlineNode(el, ox, oy);
+      if (o) out.push(o);
+    } catch (e) {}
+  }
   // Paint layer of what this element produced, for the parent's ordering (paintOrder).
   if (out.length && el.nodeType === 1) {
     const cs = css(el);
@@ -900,6 +906,29 @@ function walk(el, ox, oy) {
     }
   }
   return out;
+}
+
+// outline / outline-offset: a stroke-only rectangle around the border box, as an
+// absolute sibling (the element's own overflow never clips its outline).
+function outlineNode(el, ox, oy) {
+  const cs = css(el);
+  const st = cs.outlineStyle;
+  if (!st || st === 'none' || st === 'hidden' || cs.display === 'contents') return null;
+  const w = parseFloat(cs.outlineWidth) || 0;
+  const col = parseColor(cs.outlineColor);
+  if (w <= 0 || !col || col.a === 0) return null;
+  const rect = el.getBoundingClientRect();
+  const e = (parseFloat(cs.outlineOffset) || 0) + w;
+  const x = rect.left - ox - e, y = rect.top - oy - e, ww = rect.width + 2 * e, hh = rect.height + 2 * e;
+  if (ww <= 2 * w || hh <= 2 * w) return null;
+  const rr = radii(cs, { w: rect.width, h: rect.height });
+  const grow = (v) => (v > 0 ? r2(Math.max(0, v + e)) : 0);
+  const sw = r2(Math.min(w, ww / 2, hh / 2));
+  return {
+    type: 'RECT', name: 'outline', absolute: true, x: r2(x), y: r2(y), w: r2(ww), h: r2(hh), fills: [],
+    stroke: { paint: solid(col), weights: { t: sw, r: sw, b: sw, l: sw }, dash: st === 'dashed' ? [w * 3, w * 2] : st === 'dotted' ? [w, w] : null },
+    radii: rr && { tl: grow(rr.tl), tr: grow(rr.tr), br: grow(rr.br), bl: grow(rr.bl) },
+  };
 }
 
 // CSS paint order inside one stacking level: negative z, in-flow non-positioned,
@@ -1030,6 +1059,17 @@ function walkEl(el, ox, oy) {
     return [k];
   }
   const f = frameNode(el, box, visual, common, kids);
+  if (!f.children.length && visual.radii && visual.radii.ellipse) {
+    // A leaf with elliptical corners: a real ellipse or a vector outline.
+    const e = visual.radii.ellipse;
+    const full = ['tl', 'tr', 'br', 'bl'].every((k) => Math.abs(e[k][0] - box.w / 2) < 0.6 && Math.abs(e[k][1] - box.h / 2) < 0.6);
+    f.type = full ? 'ELLIPSE' : 'VECTOR';
+    if (!full) f.d = ellipticalPath(box.w, box.h, e);
+    f.radii = null;
+    delete f.children;
+    delete f.clip;
+    return [f];
+  }
   tryAutoLayout(f, cs);
   return [f];
 }
@@ -1084,12 +1124,60 @@ function shift(node, ox, oy) {
 }
 
 function frameNode(el, box, visual, common, children) {
-  if (visual.innerRect) children = [visual.innerRect].concat(children);
-  return {
+  const pre = [];
+  if (visual.innerRect) pre.push(visual.innerRect);
+  let stroke = visual.stroke;
+  for (const st of stroke ? [stroke].concat(stroke.extra || []) : []) {
+    if (!st.dbl) continue;
+    const w = st.weights, i = { x: 2 * w.l, y: 2 * w.t, w: box.w - 2 * (w.l + w.r), h: box.h - 2 * (w.t + w.b) };
+    const rr = visual.radii;
+    const red = (v, a, b) => r2(Math.max(0, v - 2 * Math.max(a, b)));
+    if (i.w > 0 && i.h > 0) pre.push({ type: 'FRAME', name: 'border', absolute: true, x: r2(i.x), y: r2(i.y), w: r2(i.w), h: r2(i.h), fills: [], stroke: { paint: st.paint, weights: w, dash: null },
+      radii: rr && { tl: red(rr.tl, w.l, w.t), tr: red(rr.tr, w.r, w.t), br: red(rr.br, w.r, w.b), bl: red(rr.bl, w.l, w.b) }, effects: [], children: [] });
+    delete st.dbl;
+  }
+  if (stroke && stroke.extra) {
+    // Other border colors/styles: overlays with the same outline, below the content.
+    for (const x of stroke.extra) pre.push({ type: 'FRAME', name: 'border', absolute: true, x: 0, y: 0, w: box.w, h: box.h, fills: [], stroke: x, radii: visual.radii, effects: [], children: [] });
+    stroke = Object.assign({}, stroke);
+    delete stroke.extra;
+  }
+  const f = {
     type: 'FRAME', name: nameFor(el), ...box,
-    fills: visual.fills, stroke: visual.stroke, radii: visual.radii, effects: visual.effects, clip: visual.clip,
-    absolute: common.absolute, opacity: common.opacity, children,
+    fills: visual.fills, stroke, radii: visual.radii, effects: visual.effects, clip: visual.clip,
+    absolute: common.absolute, opacity: common.opacity, children: pre.concat(children),
   };
+  try { fixSpread(f); } catch (e) {}
+  return f;
+}
+
+// Figma ignores shadow spread on frames that don't clip their content.
+function fixSpread(f) {
+  const fx = f.effects || [];
+  if (f.clip || !fx.some((e) => e.spread && /SHADOW/.test(e.type))) return;
+  const inkFits = (kids, ox, oy) => kids.every((k) => {
+    let pad = 0;
+    for (const e of k.effects || []) if (e.type === 'DROP_SHADOW' || e.type === 'LAYER_BLUR') pad = Math.max(pad, Math.abs(e.offset ? e.offset.x : 0) + Math.abs(e.offset ? e.offset.y : 0) + (e.radius || 0) + Math.max(0, e.spread || 0));
+    if (k.rotation || k.xf) pad += Math.max(k.w, k.h);
+    const x = ox + k.x, y = oy + k.y;
+    if (x - pad < -0.5 || y - pad < -0.5 || x + k.w + pad > f.w + 0.5 || y + k.h + pad > f.h + 0.5) return false;
+    return k.clip || !k.children || inkFits(k.children, x, y);
+  });
+  if (f.fills && f.fills.length && inkFits(f.children || [], 0, 0)) { f.clip = true; return; }
+  // A pure ring (0 0 0 Npx) is an outside (or inside) stroke.
+  const rings = fx.filter((e) => /SHADOW/.test(e.type) && !e.offset.x && !e.offset.y && !e.radius && e.spread > 0);
+  if (!f.stroke && rings.length === 1) {
+    const e = rings[0], s = e.spread;
+    f.stroke = { paint: { type: 'SOLID', color: { r: e.color.r, g: e.color.g, b: e.color.b }, opacity: r2(e.color.a) }, weights: { t: s, r: s, b: s, l: s }, dash: null, align: e.type === 'INNER_SHADOW' ? 'INSIDE' : 'OUTSIDE' };
+    f.effects = fx.filter((x) => x !== e);
+    if (!f.effects.some((x) => x.spread && /SHADOW/.test(x.type))) return;
+  }
+  if (!(f.fills && f.fills.length)) return;
+  // Otherwise the paint moves to a background rectangle, which honors spread.
+  f.children = [{ type: 'RECT', name: 'background', absolute: true, x: 0, y: 0, w: f.w, h: f.h, fills: f.fills, stroke: f.stroke, radii: f.radii, effects: f.effects, cons: { h: 'STRETCH', v: 'STRETCH' } }].concat(f.children || []);
+  f.fills = [];
+  f.stroke = null;
+  f.effects = [];
 }
 
 // Utility classes (Tailwind and friends) say nothing about what a layer is.
@@ -1161,16 +1249,26 @@ function backgroundFills(cs, box, inner) {
   // trick) can't share one Figma fill list: they go to an inset child instead.
   const clips = splitTop(cs.backgroundClip || '').map((c) => c.trim());
   const bw = SIDES.map((sd) => parseFloat(cs[`border${sd}Width`]) || 0);
-  let nInner = 0;
-  if (inner && box && bw.some((v) => v > 0) && cs.backgroundImage !== 'none') {
-    const nl = splitTop(cs.backgroundImage).length;
-    const isIn = (i) => /padding-box|content-box/.test(clips.length ? clips[i % clips.length] : '');
+  const pd = SIDES.map((sd) => parseFloat(cs[`padding${sd}`]) || 0);
+  let nInner = 0, colorInner = false, ib = null;
+  if (inner && box && clips.some((c) => /padding-box|content-box/.test(c))) {
+    const nl = cs.backgroundImage !== 'none' ? splitTop(cs.backgroundImage).length : 0;
+    const clipOf = (i) => (clips.length ? clips[i % clips.length] : 'border-box');
+    const isIn = (i) => /padding-box|content-box/.test(clipOf(i));
     while (nInner < nl && isIn(nInner)) nInner++;
-    if (nInner === nl || !Array.from({ length: nl - nInner }, (_, j) => !isIn(nInner + j)).every(Boolean)) nInner = 0;
+    // Only a top run of inset layers works as a child above the frame's own fills.
+    if (!Array.from({ length: nl - nInner }, (_, j) => !isIn(nInner + j)).every(Boolean)) nInner = 0;
+    colorInner = nInner === nl && isIn(Math.max(0, nl - 1));
+    const content = /content-box/.test(clipOf(Math.max(0, nl - 1)));
+    const e = SIDES.map((sd, k) => bw[k] + (content ? pd[k] : 0));
+    ib = { x: e[3], y: e[0], w: box.w - e[1] - e[3], h: box.h - e[0] - e[2] };
+    if (!(e.some((v) => v > 0) && ib.w > 0 && ib.h > 0)) { nInner = 0; colorInner = false; }
   }
   if (cs.webkitBackgroundClip === 'text' || cs.backgroundClip === 'text') return fills;
   const c = parseColor(cs.backgroundColor);
-  if (c && c.a > 0) fills.push(solid(c));
+  if (c && c.a > 0) {
+    if (colorInner) { Object.assign(inner, ib, { fills: [solid(c)] }); } else fills.push(solid(c));
+  }
   if (cs.backgroundImage && cs.backgroundImage !== 'none') {
     const layers = splitTop(cs.backgroundImage);
     const sizes = splitTop(cs.backgroundSize || '');
@@ -1181,12 +1279,9 @@ function backgroundFills(cs, box, inner) {
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i].trim();
       if (i < nInner) {
-        const ib = { x: bw[3], y: bw[0], w: box.w - bw[1] - bw[3], h: box.h - bw[0] - bw[2] };
-        if (ib.w > 0 && ib.h > 0) {
-          if (!inner.fills) Object.assign(inner, ib, { fills: [] });
-          const g = gradientPaint(layer, ib.w, ib.h);
-          if (g) inner.fills.push(g);
-        }
+        if (!inner.fills) Object.assign(inner, ib, { fills: [] });
+        const g = gradientPaint(layer, ib.w, ib.h);
+        if (g) inner.fills.push(g);
         continue;
       }
       const url = /^url\(\s*["']?(.*?)["']?\s*\)$/.exec(layer);
@@ -1287,8 +1382,7 @@ function bevel(col, side, style) {
 function borders(cs, box) {
   const weights = {};
   const cols = {};
-  let paint = null;
-  let style = null;
+  const groups = [];
   for (const s of SIDES) {
     let w = parseFloat(cs[`border${s}Width`]) || 0;
     const st = cs[`border${s}Style`];
@@ -1296,37 +1390,74 @@ function borders(cs, box) {
     if (st === 'none' || st === 'hidden' || !col || col.a === 0) w = 0;
     const side = s[0].toLowerCase();
     if (w > 0 && BEVEL_DARK[st]) col = bevel(col, side, st);
-    if (w > 0) cols[side] = col;
-    if (w > 0 && !paint) {
-      paint = solid(col);
-      style = BEVEL_DARK[st] ? 'solid' : st;
-    }
     weights[side] = r2(w);
+    if (!(w > 0)) continue;
+    cols[side] = col;
+    // One Figma stroke per color + style: sides that differ become extra strokes.
+    const style = BEVEL_DARK[st] ? 'solid' : st;
+    const key = [col.r, col.g, col.b, col.a].map((v) => Math.round(v * 255)).join() + '|' + style;
+    let g = groups.find((x) => x.key === key);
+    if (!g) groups.push((g = { key, col, style, weights: { t: 0, r: 0, b: 0, l: 0 }, total: 0 }));
+    g.weights[side] = r2(w);
+    g.total += w;
   }
-  if (!paint) return null;
+  if (!groups.length) return null;
   // A rule (<hr>): no content area and two colors — fill with the bottom
   // color, top border as an inside stroke.
   const key = (c) => (c ? [c.r, c.g, c.b, c.a].map((v) => Math.round(v * 255)).join() : '');
   if (box && cols.t && cols.b && key(cols.t) !== key(cols.b) && box.h <= weights.t + weights.b + 0.5) {
     return { paint: solid(cols.t), weights: { t: weights.t, r: 0, b: 0, l: 0 }, dash: null, fillOverride: [solid(cols.b)] };
   }
-  const max = Math.max(weights.t, weights.r, weights.b, weights.l);
-  const dash = style === 'dashed' ? [max * 3, max * 2] : style === 'dotted' ? [max, max] : null;
-  return { paint, weights, dash };
+  const mk = (g) => {
+    const max = Math.max(g.weights.t, g.weights.r, g.weights.b, g.weights.l);
+    if (g.style === 'double' && max >= 3) {
+      // Two bands of a third each: the outer one here, the inner one as an inset overlay.
+      const third = {};
+      for (const k of ['t', 'r', 'b', 'l']) third[k] = r2(g.weights[k] / 3);
+      return { paint: solid(g.col), weights: third, dash: null, dbl: true };
+    }
+    return { paint: solid(g.col), weights: g.weights, dash: g.style === 'dashed' ? [max * 3, max * 2] : g.style === 'dotted' ? [max, max] : null };
+  };
+  if (groups.length === 1) return mk(groups[0]);
+  const primary = groups.reduce((p, g) => (g.total > p.total + 0.01 ? g : p), groups[0]);
+  const out = mk(primary);
+  out.extra = groups.filter((g) => g !== primary).map(mk);
+  return out;
 }
 
 function radii(cs, box) {
-  const limit = Math.min(box.w, box.h) / 2;
-  const one = (v) => {
-    const first = (v || '0').split(' ')[0];
-    const px = first.endsWith('%') ? parseFloat(first) / 100 * Math.min(box.w, box.h) : parseFloat(first) || 0;
-    return r2(Math.min(px, limit));
+  const corner = (v) => {
+    const t = (v || '0').trim().split(/\s+/);
+    const one = (tok, ref) => (tok.endsWith('%') ? parseFloat(tok) / 100 * ref : parseFloat(tok) || 0);
+    return { x: one(t[0], box.w), y: one(t[1] || t[0], box.h) };
   };
-  const r = {
-    tl: one(cs.borderTopLeftRadius), tr: one(cs.borderTopRightRadius),
-    br: one(cs.borderBottomRightRadius), bl: one(cs.borderBottomLeftRadius),
-  };
-  return r.tl || r.tr || r.br || r.bl ? r : null;
+  const c = { tl: corner(cs.borderTopLeftRadius), tr: corner(cs.borderTopRightRadius), br: corner(cs.borderBottomRightRadius), bl: corner(cs.borderBottomLeftRadius) };
+  // CSS shrinks all corners by one factor when adjacent radii overlap.
+  let f = 1;
+  const fit = (side, a, b) => { if (a + b > 0) f = Math.min(f, side / (a + b)); };
+  fit(box.w, c.tl.x, c.tr.x); fit(box.w, c.bl.x, c.br.x); fit(box.h, c.tl.y, c.bl.y); fit(box.h, c.tr.y, c.br.y);
+  const keys = ['tl', 'tr', 'br', 'bl'];
+  for (const k of keys) { c[k].x *= f; c[k].y *= f; }
+  const r = {};
+  let ell = false;
+  for (const k of keys) {
+    r[k] = r2(Math.min(c[k].x, c[k].y));
+    if (Math.abs(c[k].x - c[k].y) > 0.5) ell = true;
+  }
+  if (!(r.tl || r.tr || r.br || r.bl || ell)) return null;
+  if (ell) r.ellipse = { tl: [r2(c.tl.x), r2(c.tl.y)], tr: [r2(c.tr.x), r2(c.tr.y)], br: [r2(c.br.x), r2(c.br.y)], bl: [r2(c.bl.x), r2(c.bl.y)] };
+  return r;
+}
+
+// A box with elliptical corners as a closed path (cubic arcs, Figma vector syntax).
+function ellipticalPath(w, h, e) {
+  const k = 0.5523;
+  const [tlx, tly] = e.tl, [trx, try_] = e.tr, [brx, bry] = e.br, [blx, bly] = e.bl;
+  const p = (v) => r2(v);
+  return `M ${p(tlx)} 0 L ${p(w - trx)} 0 C ${p(w - trx + k * trx)} 0 ${p(w)} ${p(try_ - k * try_)} ${p(w)} ${p(try_)} ` +
+    `L ${p(w)} ${p(h - bry)} C ${p(w)} ${p(h - bry + k * bry)} ${p(w - brx + k * brx)} ${p(h)} ${p(w - brx)} ${p(h)} ` +
+    `L ${p(blx)} ${p(h)} C ${p(blx - k * blx)} ${p(h)} 0 ${p(h - bly + k * bly)} 0 ${p(h - bly)} ` +
+    `L 0 ${p(tly)} C 0 ${p(tly - k * tly)} ${p(tlx - k * tlx)} 0 ${p(tlx)} 0 Z`;
 }
 
 function parseShadows(str) {

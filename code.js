@@ -88,6 +88,12 @@ function buildNode(n, parent, ctx) {
 function createNode(n, ctx) {
   if (n.type === 'TEXT') return createText(n, ctx);
   if (n.type === 'RECT') return figma.createRectangle();
+  if (n.type === 'ELLIPSE') return figma.createEllipse();
+  if (n.type === 'VECTOR') {
+    const v = figma.createVector();
+    v.vectorPaths = [{ windingRule: n.rule || 'NONZERO', data: n.d }];
+    return v;
+  }
   if (n.type === 'SVG') {
     try {
       return figma.createNodeFromSvg(n.svg);
@@ -123,7 +129,8 @@ function shapeNode(node, n, ctx) {
     }
   } else {
     node.name = n.name || node.name;
-    node.resize(Math.max(0.01, n.w), Math.max(0.01, n.h));
+    // A vector takes its size from its path (already in box coordinates).
+    if (n.type !== 'VECTOR') node.resize(Math.max(0.01, n.w), Math.max(0.01, n.h));
     applyBox(node, n, ctx);
   }
   if (typeof n.opacity === 'number' && n.opacity < 1) node.opacity = n.opacity;
@@ -140,6 +147,9 @@ function place(node, n, parent) {
   } else {
     node.x = n.x;
     node.y = n.y;
+  }
+  if (n.cons && (n.absolute || !auto)) {
+    try { node.constraints = { horizontal: n.cons.h, vertical: n.cons.v }; } catch (e) {}
   }
 }
 
@@ -162,9 +172,11 @@ function applyBox(node, n, ctx) {
   node.fills = (n.fills || []).map((p) => toPaint(p, ctx)).filter(Boolean);
   if (n.stroke) {
     node.strokes = [toPaint(n.stroke.paint, ctx)];
-    node.strokeAlign = 'INSIDE';
+    node.strokeAlign = n.stroke.align || 'INSIDE';
     const w = n.stroke.weights;
-    if (w.t === w.r && w.r === w.b && w.b === w.l) {
+    if (node.type === 'ELLIPSE' || node.type === 'VECTOR') {
+      node.strokeWeight = Math.max(w.t, w.r, w.b, w.l);
+    } else if (w.t === w.r && w.r === w.b && w.b === w.l) {
       node.strokeWeight = w.t;
     } else {
       node.strokeTopWeight = w.t;

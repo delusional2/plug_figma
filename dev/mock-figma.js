@@ -45,6 +45,7 @@ class Node {
   set strokes(v) { v.forEach(checkPaint); this._strokes = v; } get strokes() { return this._strokes; }
   set effects(v) { v.forEach(checkEffect); this._effects = v; } get effects() { return this._effects; }
   set layoutAlign(v) { oneOf(v, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'INHERIT'], 'layoutAlign'); if (!this.parent || this.parent.layoutMode === 'NONE') fail('layoutAlign outside AL'); this._la = v; } get layoutAlign() { return this._la; }
+  set constraints(v) { keysOnly(v, ['horizontal', 'vertical'], 'constraints'); oneOf(v.horizontal, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.horizontal'); oneOf(v.vertical, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.vertical'); this._cons = v; } get constraints() { return this._cons; }
   set layoutPositioning(v) { oneOf(v, ['AUTO', 'ABSOLUTE'], 'layoutPositioning'); if (v === 'ABSOLUTE' && (!this.parent || !this.parent.layoutMode || this.parent.layoutMode === 'NONE')) fail('ABSOLUTE outside AL'); this._lp = v; } get layoutPositioning() { return this._lp; }
 }
 class Frame extends Node {
@@ -63,6 +64,29 @@ class Frame extends Node {
   set dashPattern(v) { v.forEach((d) => num(d, 'dash')); }
 }
 class Rect extends Frame { constructor() { super(); this.type = 'RECTANGLE'; this.children = null; } }
+class Shape extends Node {
+  constructor(type) { super(type); this.children = null; }
+  set strokeWeight(v) { num(v, 'strokeWeight'); if (v < 0) fail('neg strokeWeight'); }
+  set strokeAlign(v) { oneOf(v, ['INSIDE', 'OUTSIDE', 'CENTER'], 'strokeAlign'); }
+  set dashPattern(v) { v.forEach((d) => num(d, 'dash')); }
+}
+class Ellipse extends Shape { constructor() { super('ELLIPSE'); } }
+class Vector extends Shape {
+  constructor() { super('VECTOR'); }
+  set vectorPaths(v) {
+    if (!Array.isArray(v) || !v.length) fail('vectorPaths');
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of v) {
+      keysOnly(p, ['windingRule', 'data'], 'vectorPath'); oneOf(p.windingRule, ['NONZERO', 'EVENODD', 'NONE'], 'windingRule');
+      if (typeof p.data !== 'string' || !/^\s*M/.test(p.data) || /[^MLQCZ0-9.eE\s-]/.test(p.data)) fail('vectorPath data: ' + String(p.data).slice(0, 60));
+      const nums = p.data.match(/-?[\d.]+(?:e-?\d+)?/g) || [];
+      if (nums.length % 2) fail('vectorPath odd coordinates');
+      for (let i = 0; i < nums.length; i += 2) { const x = +nums[i], y = +nums[i + 1]; num(x, 'path x'); num(y, 'path y'); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    }
+    this.width = Math.max(0.01, x1 - x0); this.height = Math.max(0.01, y1 - y0); this._vp = v;
+  }
+  get vectorPaths() { return this._vp; }
+}
 class Text extends Node {
   constructor() { super('TEXT'); this.children = null; this._font = { family: 'Inter', style: 'Regular' }; this._chars = ''; }
   set fontName(f) { if (!loaded.has(fk(f))) fail('font not loaded ' + fk(f)); this._font = f; } get fontName() { return this._font; }
@@ -91,6 +115,8 @@ const figma = {
   viewport: { scrollAndZoomIntoView() {} },
   createFrame() { const f = new Frame(); page.appendChild(f); return f; },
   createRectangle() { const r = new Rect(); page.appendChild(r); return r; },
+  createEllipse() { const e = new Ellipse(); page.appendChild(e); return e; },
+  createVector() { const v = new Vector(); page.appendChild(v); return v; },
   createText() { const t = new Text(); page.appendChild(t); return t; },
   createNodeFromSvg(svg) {
     if (!/^<svg[\s>]/.test(svg)) fail('svg parse');
