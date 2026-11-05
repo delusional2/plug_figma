@@ -136,12 +136,15 @@ async function original(caseFile, tabs) {
   await p.goto(`${BASE}/dev/out/${tmpName}`);
   const h = await p.eval(`(async () => {
     const st = document.createElement('style'); st.textContent = ${JSON.stringify(KILL_MOTION)}; (document.head || document.documentElement).appendChild(st);
+    // SPAs (Babel/React from a CDN) render after load: wait for the DOM to go quiet, like the agent's settle().
+    let last = performance.now(); new MutationObserver(() => { last = performance.now(); }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    for (const t0 = performance.now(); performance.now() - t0 < 8000 && performance.now() - last < 500;) await new Promise(r => setTimeout(r, 50));
     await document.fonts.ready; await new Promise(r => setTimeout(r, 500));
     const total = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
     for (let y = 0; y < total; y += ${height} * 0.75) { scrollTo(0, y); await new Promise(r => setTimeout(r, 40)); }
     scrollTo(0, 0);
     // Remote image hosts throttle after many runs: never wait for them forever.
-    await Promise.race([Promise.all([...document.images].filter(i => !i.complete).map(i => new Promise(r => { i.addEventListener('load', r); i.addEventListener('error', r); }))), new Promise(r => setTimeout(r, 20000))]);
+    for (const t0 = performance.now(); performance.now() - t0 < 20000 && [...document.images].some(i => !i.complete);) await new Promise(r => setTimeout(r, 100));
     await new Promise(r => setTimeout(r, 400));
     return Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
   })()`);
@@ -217,45 +220,61 @@ async function runCase(c) {
   fs.writeFileSync(path.join(OUT, name + '.diff.png'), Buffer.from(d.png, 'base64'));
   const count = (n) => 1 + (n.children || []).reduce((a, k) => a + count(k), 0);
   const al = (n) => (n.layout ? 1 : 0) + (n.children || []).reduce((a, k) => a + al(k), 0);
-  return { case: name, diffPct: +d.pct.toFixed(2), heightDelta: d.heightDelta, layers: count(doc.root), autoLayouts: al(doc.root), images: doc.images.length, imagesMissing: doc.images.filter((i) => !i.bytes).length, warnings: (doc.warnings || []).join(',') || undefined, mockErrors: mockErrors ? String(mockErrors).slice(0, 400) : 0 };
+  return { case: name, diffPct: +d.pct.toFixed(2), heightDelta: d.heightDelta, layers: count(doc.root), autoLayouts: al(doc.root), images: doc.images.length, imagesMissing: doc.images.filter((i) => !i.bytes).length, slowImages: doc.images.filter((i) => i.slow).length || undefined, warnings: (doc.warnings || []).join(',') || undefined, mockErrors: mockErrors ? String(mockErrors).slice(0, 400) : 0 };
 }
 
 const results = [];
+// One case in fresh browser contexts with a hard time limit; never throws.
+async function runOne(c) {
+  const name = c.replace(/\.html$/, '') + (width !== 1440 ? `@${width}` : '');
+  const ctx = { tabs: new Set() };
+  let timer, r;
+  try {
+    // Each case in its own browser context: its own renderer process and HTTP cache,
+    // so a hung or heavy page (or a cache lock on a slow image) can't stall the others.
+    const mkContext = () => Promise.race([send('Target.createBrowserContext', {}), sleep(15000).then(() => { throw new Error('browser did not create a context'); })]);
+    ctx.tabs.contextId = (await mkContext()).browserContextId;
+    ctx.tabs.origContextId = (await mkContext()).browserContextId;
+    r = await Promise.race([
+      runCase.call(ctx, c),
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`case timed out after ${caseTimeout}s in ${ctx.phase}`)), caseTimeout * 1000); }),
+    ]);
+  } catch (e) {
+    r = { case: name, error: String(e.message || e).slice(0, 400) };
+  } finally {
+    clearTimeout(timer);
+    const left = [...ctx.tabs];
+    ctx.tabs.clear();
+    // A hung page may never answer closeTarget: don't let teardown block the worker.
+    await Promise.race([Promise.all(left.map((targetId) => send('Target.closeTarget', { targetId }).catch(() => {}))), sleep(5000)]);
+    for (const browserContextId of [ctx.tabs.contextId, ctx.tabs.origContextId]) {
+      if (browserContextId) await Promise.race([send('Target.disposeBrowserContext', { browserContextId }).catch(() => {}), sleep(5000)]);
+    }
+  }
+  return r;
+}
 try {
   const queue = cases.slice();
   const worker = async () => {
     while (queue.length) {
       const c = queue.shift();
-      const name = c.replace(/\.html$/, '') + (width !== 1440 ? `@${width}` : '');
-      const ctx = { tabs: new Set() };
-      let timer;
-      try {
-        // Each case in its own browser context: its own renderer process and HTTP cache,
-        // so a hung or heavy page (or a cache lock on a slow image) can't stall the others.
-        const mkContext = () => Promise.race([send('Target.createBrowserContext', {}), sleep(15000).then(() => { throw new Error('browser did not create a context'); })]);
-        ctx.tabs.contextId = (await mkContext()).browserContextId;
-        ctx.tabs.origContextId = (await mkContext()).browserContextId;
-        results.push(await Promise.race([
-          runCase.call(ctx, c),
-          new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`case timed out after ${caseTimeout}s in ${ctx.phase}`)), caseTimeout * 1000); }),
-        ]));
-      } catch (e) {
-        results.push({ case: name, error: String(e.message || e).slice(0, 400) });
-      } finally {
-        const r = results[results.length - 1];
-        process.stderr.write(`[${results.length}/${cases.length}] ${name} ${r.error ? 'ERROR ' + r.error.slice(0, 80) : r.diffPct + '%'}\n`);
-        clearTimeout(timer);
-        const left = [...ctx.tabs];
-        ctx.tabs.clear();
-        // A hung page may never answer closeTarget: don't let teardown block the worker.
-        await Promise.race([Promise.all(left.map((targetId) => send('Target.closeTarget', { targetId }).catch(() => {}))), sleep(5000)]);
-        for (const browserContextId of [ctx.tabs.contextId, ctx.tabs.origContextId]) {
-          if (browserContextId) await Promise.race([send('Target.disposeBrowserContext', { browserContextId }).catch(() => {}), sleep(5000)]);
-        }
-      }
+      const r = await runOne(c);
+      results.push(r);
+      process.stderr.write(`[${results.length}/${cases.length}] ${r.case} ${r.error ? 'ERROR ' + r.error.slice(0, 80) : r.diffPct + '%'}\n`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(jobs, cases.length) }, worker));
+  // Image hosts (picsum/unsplash) stall under parallel load and the stage then marks images
+  // "slow": rerun those cases (and timeouts) one at a time so the numbers don't depend on --jobs.
+  if (jobs > 1) {
+    for (let i = 0; i < results.length; i++) {
+      if (!results[i].slowImages && !results[i].error) continue;
+      const c = cases.find((f) => results[i].case === f.replace(/\.html$/, '') + (width !== 1440 ? `@${width}` : ''));
+      const r = await runOne(c);
+      process.stderr.write(`[rerun] ${r.case} ${r.error ? 'ERROR ' + r.error.slice(0, 80) : r.diffPct + '%'}\n`);
+      results[i] = r;
+    }
+  }
   results.sort((a, b) => (a.case < b.case ? -1 : 1));
 } finally {
   ws.close();
