@@ -1159,7 +1159,7 @@ function backgroundFills(cs, box) {
             bg = { w: r2(box.w), h: r2(box.h), size, px: at(posX, i) || '0%', py: at(posY, i) || '0%', repeat: at(reps, i) || 'repeat',
               ox: n('borderLeftWidth'), oy: n('borderTopWidth'), aw: r2(box.w - n('borderLeftWidth') - n('borderRightWidth')), ah: r2(box.h - n('borderTopWidth') - n('borderBottomWidth')) };
           }
-          fills.push({ type: 'IMAGE', ref: imageRef(url[1], null, bg), scaleMode: /contain/.test(size) ? 'FIT' : 'FILL' });
+          fills.push({ type: 'IMAGE', ref: imageRef(url[1], null, bg, box.w, box.h), scaleMode: /contain/.test(size) ? 'FIT' : 'FILL' });
         }
       } else {
         const g = gradientPaint(layer, box.w, box.h);
@@ -1903,15 +1903,18 @@ function looseText(tn, parent, ox, oy) {
 
 // ---------- replaced elements ----------
 
-function imageRef(url, el, bg) {
+// dw/dh: the largest size the image is shown at (SVGs are rasterized for it).
+function imageRef(url, el, bg, dw, dh) {
   const key = bg ? url + '|' + JSON.stringify(bg) : url;
   let it = S.images.get(key);
   if (!it) {
-    it = { ref: 'img' + S.images.size, url, el, bg: bg || null };
+    it = { ref: 'img' + S.images.size, url, el, bg: bg || null, dw: 0, dh: 0 };
     S.images.set(key, it);
   } else if (!it.el && el) {
     it.el = el;
   }
+  it.dw = Math.max(it.dw, dw || 0);
+  it.dh = Math.max(it.dh, dh || 0);
   return it.ref;
 }
 
@@ -1922,10 +1925,96 @@ function boxed(type, name, box, v, fills) {
 function imageNode(el, cs, box) {
   const v = boxVisual(el, cs, box);
   const src = el.currentSrc || el.src;
-  const fills = v.fills.slice();
-  if (src && S.opts.images) fills.push({ type: 'IMAGE', ref: imageRef(src, el), scaleMode: FIT_MODES[cs.objectFit] || 'FILL' });
-  else fills.push(PLACEHOLDER_FILL);
-  return boxed('RECT', el.alt ? `img · ${el.alt}`.slice(0, 60) : 'img', box, v, fills);
+  const name = el.alt ? `img · ${el.alt}`.slice(0, 60) : 'img';
+  const n = (p) => parseFloat(cs[p]) || 0;
+  const iL = n('borderLeftWidth') + n('paddingLeft'), iR = n('borderRightWidth') + n('paddingRight');
+  const iT = n('borderTopWidth') + n('paddingTop'), iB = n('borderBottomWidth') + n('paddingBottom');
+  const cw = r2(Math.max(0, box.w - iL - iR)), ch = r2(Math.max(0, box.h - iT - iB));
+  let paint = PLACEHOLDER_FILL;
+  let vector = null;
+  if (src && S.opts.images && cw > 0 && ch > 0) {
+    vector = svgImage(el, src, cs, cw, ch);
+    if (!vector) paint = imagePaint(el, src, cs, cw, ch);
+  }
+  // No padding/border: one rectangle, as before.
+  if (!(iL || iR || iT || iB) && !vector) return boxed('RECT', name, box, v, v.fills.concat(paint));
+  // The image sits in the content box, inside the border and padding.
+  const f = boxed('FRAME', name, box, v, v.fills);
+  f.clip = true;
+  f.children = [];
+  if (cw > 0 && ch > 0) {
+    const r = v.radii;
+    const inner = r && { tl: r2(Math.max(0, r.tl - Math.max(iL, iT))), tr: r2(Math.max(0, r.tr - Math.max(iR, iT))), br: r2(Math.max(0, r.br - Math.max(iR, iB))), bl: r2(Math.max(0, r.bl - Math.max(iL, iB))) };
+    if (vector) {
+      const c = vector._center;
+      delete vector._center;
+      f.children.push(Object.assign(vector, c ? { x: r2(iL + (c[0] - vector.w) / 2), y: r2(iT + (c[1] - vector.h) / 2) } : { x: r2(iL), y: r2(iT) }));
+    }
+    else f.children.push({ type: 'RECT', name: 'image', x: r2(iL), y: r2(iT), w: cw, h: ch, fills: [paint], radii: inner && (inner.tl || inner.tr || inner.br || inner.bl) ? inner : null });
+  }
+  return f;
+}
+
+// object-fit / object-position: centered cover and contain are Figma's FILL and
+// FIT; fill (stretch), none, scale-down and off-center positions are composed.
+function imagePaint(el, src, cs, cw, ch) {
+  const fit = cs.objectFit || 'fill';
+  const pos = (cs.objectPosition || '50% 50%').split(/\s+(?![^(]*\))/);
+  const centered = pos[0] === '50%' && (pos[1] || '50%') === '50%';
+  const nw = el.naturalWidth, nh = el.naturalHeight;
+  if (!nw || !nh || (centered && (fit === 'cover' || fit === 'contain'))) {
+    return { type: 'IMAGE', ref: imageRef(src, el, null, cw, ch), scaleMode: FIT_MODES[fit] || 'FILL' };
+  }
+  let size;
+  if (fit === 'fill') size = '100% 100%';
+  else if (fit === 'none') size = `${nw}px ${nh}px`;
+  else if (fit === 'scale-down') size = nw <= cw && nh <= ch ? `${nw}px ${nh}px` : 'contain';
+  else size = fit;
+  // Same aspect as the box: stretching changes nothing.
+  if (fit === 'fill' && Math.abs(nw / nh - cw / ch) < 0.01) return { type: 'IMAGE', ref: imageRef(src, el, null, cw, ch), scaleMode: 'FILL' };
+  const bg = { w: cw, h: ch, size, px: pos[0] || '50%', py: pos[1] || '50%', repeat: 'no-repeat', ox: 0, oy: 0, aw: cw, ah: ch };
+  return { type: 'IMAGE', ref: imageRef(src, el, bg, cw, ch), scaleMode: 'FILL' };
+}
+
+// A data:image/svg+xml image imports as an editable vector.
+function svgImage(el, src, cs, cw, ch) {
+  if (!/^data:image\/svg\+xml/i.test(src)) return null;
+  const fit = cs.objectFit || 'fill';
+  if (!/^(fill|contain|scale-down)$/.test(fit)) return null;
+  const pos = (cs.objectPosition || '50% 50%').split(/\s+/);
+  if (fit !== 'fill' && !(pos[0] === '50%' && (pos[1] || '50%') === '50%')) return null;
+  try {
+    const comma = src.indexOf(',');
+    const head = src.slice(0, comma), body = src.slice(comma + 1);
+    const text = /;base64/i.test(head)
+      ? new TextDecoder().decode(Uint8Array.from(atob(body), (c) => c.charCodeAt(0)))
+      : decodeURIComponent(body);
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const svg = doc.documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return null;
+    for (const bad of svg.querySelectorAll('script,foreignObject')) bad.remove();
+    if (svg.querySelector('image,use[href^="http"],style')) return null; // external refs / CSS: keep the raster
+    if (!svg.getAttribute('viewBox')) {
+      const w0 = parseFloat(svg.getAttribute('width')) || el.naturalWidth, h0 = parseFloat(svg.getAttribute('height')) || el.naturalHeight;
+      if (!(w0 > 0 && h0 > 0)) return null;
+      svg.setAttribute('viewBox', `0 0 ${w0} ${h0}`);
+    }
+    if (fit === 'fill') svg.setAttribute('preserveAspectRatio', 'none');
+    if (fit === 'scale-down' && el.naturalWidth <= cw && el.naturalHeight <= ch) {
+      // shown at its natural size, centered
+      const w = el.naturalWidth, h = el.naturalHeight;
+      svg.setAttribute('width', w);
+      svg.setAttribute('height', h);
+      return { type: 'SVG', name: el.alt ? `img · ${el.alt}`.slice(0, 60) : 'img', x: 0, y: 0, w, h, svg: new XMLSerializer().serializeToString(svg), _center: [cw, ch] };
+    }
+    svg.setAttribute('width', cw);
+    svg.setAttribute('height', ch);
+    const out = new XMLSerializer().serializeToString(svg);
+    if (/(?:oklch|oklab|lab|lch|color)\(/i.test(out)) return null;
+    return { type: 'SVG', name: el.alt ? `img · ${el.alt}`.slice(0, 60) : 'img', x: 0, y: 0, w: cw, h: ch, svg: out };
+  } catch (e) {
+    return null;
+  }
 }
 
 function canvasNode(el, cs, box) {
@@ -2664,7 +2753,7 @@ async function loadImages(list, onProgress, budgetMs = 30000) {
     while (queue.length && !all.signal.aborted) {
       const it = queue.shift();
       try {
-        const r = await imageBytes(it.url, it.el, all.signal, it.bg);
+        const r = await imageBytes(it.url, it.el, all.signal, it.bg, it.dw, it.dh);
         it.bytes = r.bytes;
         if (r.slow) it.slow = true;
       } catch (e) { it.bytes = null; }
@@ -2687,13 +2776,13 @@ function sniff(b) {
 }
 
 // Figma accepts PNG/JPEG/GIF up to 4096px; everything else is re-encoded as PNG.
-async function imageBytes(url, el, outer, bg) {
+async function imageBytes(url, el, outer, bg, dw, dh) {
   const st = { slow: false };
-  const bytes = await imageBytesInner(url, el, outer, (v) => { st.slow = v; }, bg);
+  const bytes = await imageBytesInner(url, el, outer, (v) => { st.slow = v; }, bg, dw, dh);
   return { bytes, slow: !bytes && st.slow };
 }
 
-async function imageBytesInner(url, el, outer, setSlow, bg) {
+async function imageBytesInner(url, el, outer, setSlow, bg, dw, dh) {
   let blob = null;
   const ac = new AbortController();
   const t = _setTimeout(() => ac.abort(), 12000); // includes Chrome's cache-lock wait on the <img> request
@@ -2719,12 +2808,12 @@ async function imageBytesInner(url, el, outer, setSlow, bg) {
     try { bmp = await createImageBitmap(blob); } catch (e) {}
     if (sniff(bytes) && (!bmp || (bmp.width <= 4096 && bmp.height <= 4096))) return bytes;
     if (bmp) return toPng(bmp, bmp.width, bmp.height);
-    // SVG files can't go through createImageBitmap — draw them via <img>.
+    // SVG files can't go through createImageBitmap — draw them via <img>, at
+    // twice the largest size they are shown at (vectors re-render sharp).
     const img = await loadImg(URL.createObjectURL(blob));
-    const r = el ? el.getBoundingClientRect() : null;
-    const w = img.naturalWidth || (r ? r.width * 2 : 512);
-    const h = img.naturalHeight || (r ? r.height * 2 : 512);
-    return toPng(img, w, h);
+    const nw = img.naturalWidth || dw || 300, nh = img.naturalHeight || dh || 150;
+    const k = Math.max(2, dw ? 2 * dw / nw : 0, dh ? 2 * dh / nh : 0);
+    return toPng(img, nw * k, nh * k);
   }
   // Last resort: the copy the page already decoded (fails if the canvas gets tainted).
   if (el && el.complete && el.naturalWidth) {
