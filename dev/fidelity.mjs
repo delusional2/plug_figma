@@ -223,10 +223,13 @@ try {
       } catch (e) {
         results.push({ case: name, error: String(e.message || e).slice(0, 400) });
       } finally {
+        const r = results[results.length - 1];
+        process.stderr.write(`[${results.length}/${cases.length}] ${name} ${r.error ? 'ERROR ' + r.error.slice(0, 80) : r.diffPct + '%'}\n`);
         clearTimeout(timer);
         const left = [...ctx.tabs];
         ctx.tabs.clear();
-        await Promise.all(left.map((targetId) => send('Target.closeTarget', { targetId }).catch(() => {})));
+        // A hung page may never answer closeTarget: don't let teardown block the worker.
+        await Promise.race([Promise.all(left.map((targetId) => send('Target.closeTarget', { targetId }).catch(() => {}))), sleep(5000)]);
       }
     }
   };
