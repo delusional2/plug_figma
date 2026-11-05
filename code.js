@@ -127,6 +127,7 @@ function shapeNode(node, n, ctx) {
     if (Math.abs(node.width - n.w) > 0.5 || Math.abs(node.height - n.h) > 0.5) {
       node.resize(Math.max(0.01, n.w), Math.max(0.01, n.h));
     }
+    if (n.effects && n.effects.length) setEffects(node, n.effects);
   } else {
     node.name = n.name || node.name;
     // A vector takes its size from its path (already in box coordinates).

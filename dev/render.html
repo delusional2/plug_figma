@@ -79,13 +79,15 @@ function cssPaint(p) {
   return '#000';
 }
 
-function shadows(effects) {
+function shadows(effects, alphaShape) {
   const out = [];
   let filter = '', backdrop = '';
   for (const e of effects || []) {
-    if (e.type === 'DROP_SHADOW') out.push(`${e.offset.x}px ${e.offset.y}px ${e.radius}px ${e.spread || 0}px ${rgba(e.color)}`);
+    // showShadowBehindNode: Figma casts it from the layer's alpha, like CSS drop-shadow().
+    if (e.type === 'DROP_SHADOW' && (e.showShadowBehindNode || alphaShape)) filter += ` drop-shadow(${e.offset.x}px ${e.offset.y}px ${e.radius}px ${rgba(e.color)})`;
+    else if (e.type === 'DROP_SHADOW') out.push(`${e.offset.x}px ${e.offset.y}px ${e.radius}px ${e.spread || 0}px ${rgba(e.color)}`);
     if (e.type === 'INNER_SHADOW') out.push(`inset ${e.offset.x}px ${e.offset.y}px ${e.radius}px ${e.spread || 0}px ${rgba(e.color)}`);
-    if (e.type === 'LAYER_BLUR') filter = `blur(${e.radius / 2}px)`;
+    if (e.type === 'LAYER_BLUR') filter += ` blur(${e.radius / 2}px)`;
     if (e.type === 'BACKGROUND_BLUR') backdrop = `blur(${e.radius / 2}px)`;
   }
   return { boxShadow: out.join(', '), filter, backdrop };
@@ -181,6 +183,8 @@ function build(n, parent, images) {
     img.style.width = n.w + 'px';
     img.style.height = n.h + 'px';
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+    const sfx = shadows(n.effects);
+    if (sfx.filter) img.style.filter = sfx.filter;
     el.appendChild(img);
     parent ? parent.el.appendChild(el) : document.body.appendChild(el);
     return;
@@ -192,7 +196,8 @@ function build(n, parent, images) {
   if (n.radii) el.style.borderRadius = `${n.radii.tl}px ${n.radii.tr}px ${n.radii.br}px ${n.radii.bl}px`;
   if (n.type === 'ELLIPSE') el.style.borderRadius = '50%';
   if (n.type === 'VECTOR') el.style.clipPath = `path(${n.rule === 'EVENODD' ? 'evenodd, ' : ''}'${n.d}')`;
-  const fx = shadows(n.effects);
+  // A frame without paint casts its shadow from its content, like Figma.
+  const fx = shadows(n.effects, n.type === 'FRAME' && !(n.fills || []).length && !n.stroke);
   if (fx.boxShadow) el.style.boxShadow = fx.boxShadow;
   if (fx.filter) el.style.filter = fx.filter;
   if (fx.backdrop) el.style.backdropFilter = fx.backdrop;

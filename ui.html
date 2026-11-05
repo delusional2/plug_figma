@@ -889,6 +889,7 @@ function childrenOf(el, ox, oy) {
 function walk(el, ox, oy) {
   const out = walkEl(el, ox, oy);
   if (out.length && el.nodeType === 1) {
+    try { applyFilter(el, out); } catch (e) {}
     try {
       const o = outlineNode(el, ox, oy);
       if (o) out.push(o);
@@ -906,6 +907,93 @@ function walk(el, ox, oy) {
     }
   }
   return out;
+}
+
+// CSS filter functions. Color ones are baked into every color of the subtree (and into
+// image pixels), drop-shadow() becomes a shadow effect, opacity() the layer opacity.
+function parseFilter(str) {
+  const f = { color: [], shadows: [], blur: 0, opacity: 1, css: '' };
+  if (!str || str === 'none') return f;
+  const re = /([a-z-]+)\(((?:[^()]|\([^()]*\))*)\)/g;
+  let m;
+  const amt = (v, d) => { v = (v || '').trim(); if (!v) return d; return /%$/.test(v) ? parseFloat(v) / 100 : parseFloat(v); };
+  while ((m = re.exec(str))) {
+    const name = m[1], arg = m[2];
+    if (name === 'blur') f.blur = parseFloat(arg) || 0;
+    else if (name === 'drop-shadow') f.shadows.push(...parseShadows(arg).map((e) => Object.assign(e, { spread: 0, showShadowBehindNode: true })));
+    else if (name === 'opacity') f.opacity *= clamp01(amt(arg, 1));
+    else if (name === 'hue-rotate') f.color.push([name, arg.trim() ? toRadians(arg.trim()) : 0]);
+    else if (/^(grayscale|sepia|saturate|invert|brightness|contrast)$/.test(name)) f.color.push([name, amt(arg, 1)]);
+  }
+  f.css = f.color.map(([n, v]) => (n === 'hue-rotate' ? `${n}(${v}rad)` : `${n}(${v})`)).join(' ');
+  return f;
+}
+
+// The Filter Effects color matrices, in sRGB like Chrome's shorthand filters.
+function filterColor(c, fns) {
+  let { r, g, b } = c;
+  for (const [n, a0] of fns) {
+    const mat = (m) => { const R = m[0] * r + m[1] * g + m[2] * b, G = m[3] * r + m[4] * g + m[5] * b, B = m[6] * r + m[7] * g + m[8] * b; r = R; g = G; b = B; };
+    if (n === 'grayscale') { const a = 1 - clamp01(a0); mat([0.2126 + 0.7874 * a, 0.7152 - 0.7152 * a, 0.0722 - 0.0722 * a, 0.2126 - 0.2126 * a, 0.7152 + 0.2848 * a, 0.0722 - 0.0722 * a, 0.2126 - 0.2126 * a, 0.7152 - 0.7152 * a, 0.0722 + 0.9278 * a]); }
+    else if (n === 'sepia') { const a = 1 - clamp01(a0); mat([0.393 + 0.607 * a, 0.769 - 0.769 * a, 0.189 - 0.189 * a, 0.349 - 0.349 * a, 0.686 + 0.314 * a, 0.168 - 0.168 * a, 0.272 - 0.272 * a, 0.534 - 0.534 * a, 0.131 + 0.869 * a]); }
+    else if (n === 'saturate') { const a = a0; mat([0.213 + 0.787 * a, 0.715 - 0.715 * a, 0.072 - 0.072 * a, 0.213 - 0.213 * a, 0.715 + 0.285 * a, 0.072 - 0.072 * a, 0.213 - 0.213 * a, 0.715 - 0.715 * a, 0.072 + 0.928 * a]); }
+    else if (n === 'hue-rotate') { const co = Math.cos(a0), si = Math.sin(a0); mat([0.213 + co * 0.787 - si * 0.213, 0.715 - co * 0.715 - si * 0.715, 0.072 - co * 0.072 + si * 0.928, 0.213 - co * 0.213 + si * 0.143, 0.715 + co * 0.285 + si * 0.140, 0.072 - co * 0.072 - si * 0.283, 0.213 - co * 0.213 - si * 0.787, 0.715 - co * 0.715 + si * 0.715, 0.072 + co * 0.928 + si * 0.072]); }
+    else if (n === 'invert') { const a = clamp01(a0); r = a * (1 - r) + (1 - a) * r; g = a * (1 - g) + (1 - a) * g; b = a * (1 - b) + (1 - a) * b; }
+    else if (n === 'brightness') { r *= a0; g *= a0; b *= a0; }
+    else if (n === 'contrast') { const k = (v) => (v - 0.5) * a0 + 0.5; r = k(r); g = k(g); b = k(b); }
+    r = clamp01(r); g = clamp01(g); b = clamp01(b);
+  }
+  return { r, g, b, a: c.a };
+}
+
+function applyFilter(el, out) {
+  const cs = css(el);
+  if (!cs.filter || cs.filter === 'none') return;
+  const f = parseFilter(cs.filter);
+  if (f.color.length) for (const n of out) recolor(n, f);
+  for (const n of out) {
+    if (f.shadows.length && el.tagName.toLowerCase() !== 'svg') n.effects = (n.effects || []).concat(f.shadows.map((e) => Object.assign({}, e)));
+    if (f.blur && n.type !== 'FRAME' && !(n.effects || []).some((e) => e.type === 'LAYER_BLUR')) n.effects = (n.effects || []).concat([{ type: 'LAYER_BLUR', radius: f.blur * 2, visible: true }]);
+    if (f.opacity < 1) n.opacity = r2((n.opacity == null ? 1 : n.opacity) * f.opacity);
+  }
+}
+
+function recolor(n, f) {
+  const fc = (c) => filterColor(c, f.color);
+  const paint = (p) => {
+    if (!p) return p;
+    if (p.type === 'SOLID') {
+      const c = fc({ r: p.color.r, g: p.color.g, b: p.color.b, a: p.opacity == null ? 1 : p.opacity });
+      return { type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: p.opacity };
+    }
+    if (p.gradientStops) return Object.assign({}, p, { gradientStops: p.gradientStops.map((s) => ({ position: s.position, color: fc(s.color) })) });
+    if (p.type === 'IMAGE') {
+      // A filtered copy of the image: same source, the filter applied to its pixels.
+      for (const [key, it] of S.images) {
+        if (it.ref !== p.ref) continue;
+        const k2 = key + '|filter:' + f.css + (it.filter ? ' ' + it.filter : '');
+        let it2 = S.images.get(k2);
+        if (!it2) {
+          it2 = Object.assign({}, it, { ref: 'img' + S.images.size, filter: (it.filter ? it.filter + ' ' : '') + f.css });
+          S.images.set(k2, it2);
+        }
+        return Object.assign({}, p, { ref: it2.ref });
+      }
+    }
+    return p;
+  };
+  if (n.fills) n.fills = n.fills.map(paint);
+  if (n.stroke) n.stroke = Object.assign({}, n.stroke, { paint: paint(n.stroke.paint), extra: n.stroke.extra && n.stroke.extra.map((x) => Object.assign({}, x, { paint: paint(x.paint) })) });
+  if (n.effects) n.effects = n.effects.map((e) => (e.color ? Object.assign({}, e, { color: fc(e.color) }) : e));
+  if (n.segments) n.segments = n.segments.map((sg) => Object.assign({}, sg, { fill: paint(sg.fill) }));
+  if (n.svg) {
+    n.svg = n.svg.replace(/(^|[^(\w])#([0-9a-f]{6}|[0-9a-f]{3})\b/gi, (all, pre, hex) => {
+      const h = hex.length === 3 ? hex.replace(/./g, '$&$&') : hex;
+      const c = fc({ r: parseInt(h.slice(0, 2), 16) / 255, g: parseInt(h.slice(2, 4), 16) / 255, b: parseInt(h.slice(4, 6), 16) / 255, a: 1 });
+      return pre + toCss(c);
+    });
+  }
+  for (const k of n.children || []) recolor(k, f);
 }
 
 // outline / outline-offset: a stroke-only rectangle around the border box, as an
@@ -3302,6 +3390,9 @@ async function loadImages(list, onProgress, budgetMs = 30000) {
       const it = queue.shift();
       try {
         const r = await imageBytes(it.url, it.el, all.signal, it.bg, it.dw, it.dh);
+        if (r.bytes && it.filter) {
+          try { r.bytes = await filterBytes(r.bytes, it.filter); } catch (e) {}
+        }
         it.bytes = r.bytes;
         if (r.slow) it.slow = true;
       } catch (e) { it.bytes = null; }
@@ -3427,6 +3518,20 @@ function loadImg(src) {
     img.onerror = reject;
     img.src = src;
   });
+}
+
+// CSS color filters applied to an image's pixels (canvas filter, same engine as the page).
+async function filterBytes(bytes, filter) {
+  const bmp = await createImageBitmap(new Blob([bytes]));
+  const c = document.createElement('canvas');
+  c.width = bmp.width;
+  c.height = bmp.height;
+  const ctx = c.getContext('2d');
+  ctx.filter = filter;
+  ctx.drawImage(bmp, 0, 0);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('canvas export failed');
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 async function toPng(source, w, h) {
