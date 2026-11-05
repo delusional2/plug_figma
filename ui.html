@@ -525,7 +525,8 @@ function materializePseudos() {
     if (cs.display === 'none') return owned;
     applyCounters(cs, owned, /list-item/.test(cs.display));
     if (/list-item/.test(cs.display)) lis.push(el);
-    const canHost = !NO_PSEUDO_TAGS.has(tag) && el !== d.body.parentNode;
+    // Chrome draws ::before/::after on checkboxes and radios, not on other inputs.
+    const canHost = !NO_PSEUDO_TAGS.has(tag) && (tag !== 'INPUT' || /^(checkbox|radio)$/i.test(el.type)) && el !== d.body.parentNode;
     const b = canHost ? readPseudo(el, '::before') : null;
     if (b) recs.push(b);
     const childOwned = [];
@@ -555,6 +556,45 @@ function materializePseudos() {
     const at = r.p === '::before' ? 'data-h2f-b' : 'data-h2f-a';
     if (on) r.el.setAttribute(at, ''); else r.el.removeAttribute(at);
   };
+
+  // Out-of-flow: a proxy over the containing block's padding box, inside one
+  // fixed layer at the viewport origin (the page is scrolled to the top), so
+  // that it never adds to the document's scroll height.
+  const layer = d.createElement(PSEUDO_TAG);
+  layer.setAttribute('data-h2f-proxy', '');
+  layer.style.cssText = 'all:initial!important;position:fixed!important;left:0!important;top:0!important;width:0!important;height:0!important;display:block!important;pointer-events:none!important;z-index:2147483647!important';
+  d.documentElement.appendChild(layer);
+  const addProxy = (el, which, node) => {
+    const e = S.pseudo.get(el) || { before: [], after: [] };
+    e[which].push(node);
+    S.pseudo.set(el, e);
+  };
+
+  // In-flow pseudo-elements of a checkbox/radio (replaced, can't take children):
+  // laid out in a copy of the control's box placed over it.
+  const boxCopies = new Map();
+  for (const r of recs) {
+    if (r.oof || r.el.tagName !== 'INPUT') continue;
+    try {
+      let copy = boxCopies.get(r.el);
+      if (!copy) {
+        const ics = getComputedStyle(r.el);
+        const rc = r.el.getBoundingClientRect();
+        const decl = [];
+        for (let i = 0; i < ics.length; i++) { const k = ics[i]; if (!k.startsWith('--')) decl.push(`${k}:${ics.getPropertyValue(k)} !important`); }
+        copy = d.createElement(PSEUDO_TAG);
+        copy.style.cssText = decl.join(';') + `;position:absolute!important;left:${rc.left}px!important;top:${rc.top}px!important;margin:0!important;box-sizing:border-box!important;width:${rc.width}px!important;height:${rc.height}px!important;transform:none!important;visibility:visible!important;opacity:1!important`;
+        layer.appendChild(copy);
+        boxCopies.set(r.el, copy);
+      }
+      r.span = build(r);
+      if (r.p === '::before') copy.insertBefore(r.span, copy.firstChild); else copy.appendChild(r.span);
+      mark(r, true);
+      addProxy(r.el, r.p === '::before' ? 'before' : 'after', r.span);
+    } catch (e) {
+      console.warn('html-to-figma: skipped a pseudo-element', e);
+    }
+  }
 
   // In-flow: into the host, then check that nothing around it moved.
   const inflow = recs.filter((r) => !r.oof && r.el.tagName !== 'INPUT');
@@ -587,21 +627,8 @@ function materializePseudos() {
     if (!reverted) break;
   }
 
-  // Out-of-flow: a proxy over the containing block's padding box, inside one
-  // fixed layer at the viewport origin (the page is scrolled to the top), so
-  // that it never adds to the document's scroll height.
-  const layer = d.createElement(PSEUDO_TAG);
-  layer.setAttribute('data-h2f-proxy', '');
-  layer.style.cssText = 'all:initial!important;position:fixed!important;left:0!important;top:0!important;width:0!important;height:0!important;display:block!important;pointer-events:none!important;z-index:2147483647!important';
-  d.documentElement.appendChild(layer);
-  const addProxy = (el, which, node) => {
-    const e = S.pseudo.get(el) || { before: [], after: [] };
-    e[which].push(node);
-    S.pseudo.set(el, e);
-  };
-
-  // List markers: inside ones become real inline text, outside ones are
-  // measured with a probe and placed in the proxy layer.
+  // List markers: measured (outside: a probe at the content start; inside:
+  // just before the first character) and placed in the proxy layer.
   for (const li of lis) {
     try { materializeMarker(li, layer, addProxy); } catch (e) { console.warn('html-to-figma: skipped a list marker', e); }
   }
@@ -688,20 +715,38 @@ function materializeMarker(li, layer, addProxy) {
   } else {
     span.appendChild(d.createTextNode(text));
   }
+  let left, top;
   if (cs.listStylePosition === 'inside') {
-    span.style.cssText = `display:inline!important;white-space:pre!important;${font}`;
+    // Inside: the marker is the start of the first line; it ends where the text begins.
+    const w = d.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+    let tn;
+    while ((tn = w.nextNode()) && !/\S/.test(tn.data)) { /* skip blanks */ }
+    if (!tn) return;
+    const rg = d.createRange();
+    const i = tn.data.search(/\S/);
+    rg.setStart(tn, i);
+    rg.setEnd(tn, i + 1);
+    const cr = rg.getClientRects()[0];
+    if (!cr) return;
+    span.style.cssText = `position:absolute!important;white-space:pre!important;display:block!important;left:0!important;top:0!important;${font}`;
+    layer.appendChild(span);
+    const pr = span.getBoundingClientRect();
+    // On the first line the marker starts the line box (Chrome's gap is wider than "• ").
+    const cb = contentBox(li, cs);
+    const firstLine = cr.top - cb.y < Math.max(cr.height, pr.height);
+    left = firstLine ? Math.min(cb.x + (parseFloat(cs.textIndent) || 0), cr.left - pr.width) : cr.left - pr.width;
+    top = cr.top + (cr.height - pr.height) / 2;
+  } else {
+    // Outside: right edge at the content start, on the first line box.
+    span.style.cssText = `position:absolute!important;white-space:pre!important;transform:translateX(-100%)!important;display:inline!important;${font}`;
     li.insertBefore(span, li.firstChild);
-    li.style.setProperty('list-style-type', 'none', 'important');
-    li.style.setProperty('list-style-image', 'none', 'important');
-    return;
+    const r = span.getBoundingClientRect();
+    span.remove();
+    if (!(r.width > 0 && r.height > 0)) return;
+    left = r.left;
+    top = r.top;
   }
-  // Outside: right edge at the content start, on the first line box.
-  span.style.cssText = `position:absolute!important;white-space:pre!important;transform:translateX(-100%)!important;display:inline!important;${font}`;
-  li.insertBefore(span, li.firstChild);
-  const r = span.getBoundingClientRect();
-  span.remove();
-  if (!(r.width > 0 && r.height > 0)) return;
-  span.style.cssText = `position:absolute!important;white-space:pre!important;display:block!important;left:${r.left}px!important;top:${r.top}px!important;${font}`;
+  span.style.cssText = `position:absolute!important;white-space:pre!important;display:block!important;left:${left}px!important;top:${top}px!important;${font}`;
   layer.appendChild(span);
   addProxy(li, 'before', span);
 }
@@ -912,7 +957,14 @@ function walkEl(el, ox, oy) {
     case 'VIDEO': return leaf(videoNode(el, cs, box));
     case 'IFRAME': case 'OBJECT': case 'EMBED': case 'AUDIO':
       return leaf({ type: 'RECT', name: tag.toLowerCase(), ...box, fills: [PLACEHOLDER_FILL] });
-    case 'INPUT': case 'TEXTAREA': case 'SELECT': return leaf(formNode(el, cs, box, rect, tag));
+    case 'INPUT': case 'TEXTAREA': case 'SELECT': {
+      const f = formNode(el, cs, box, rect, tag);
+      // appearance:none checkboxes/switches draw their knob/check with ::before/::after.
+      const pl = f && pseudoLayers(el, rect.left, rect.top);
+      if (pl) f.children = pl.before.concat(f.children, pl.after);
+      return leaf(f);
+    }
+    case 'PROGRESS': case 'METER': return leaf(meterNode(el, cs, box, tag));
   }
 
   const visual = boxVisual(el, cs, box);
@@ -1053,7 +1105,11 @@ function nameFor(el) {
 
 function boxVisual(el, cs, box) {
   const fills = backgroundFills(cs, box);
-  const stroke = borders(cs);
+  const stroke = borders(cs, box);
+  if (stroke && stroke.fillOverride) {
+    if (!fills.length) fills.push(...stroke.fillOverride);
+    delete stroke.fillOverride;
+  }
   const effects = parseShadows(cs.boxShadow);
   const blur = (s) => { const m = /blur\(\s*([\d.]+)px/.exec(s || ''); return m ? parseFloat(m[1]) : 0; };
   // Figma's blur radius is roughly twice the CSS one.
@@ -1083,12 +1139,26 @@ function backgroundFills(cs, box) {
   if (cs.backgroundImage && cs.backgroundImage !== 'none') {
     const layers = splitTop(cs.backgroundImage);
     const sizes = splitTop(cs.backgroundSize || '');
+    const posX = splitTop(cs.backgroundPositionX || ''), posY = splitTop(cs.backgroundPositionY || '');
+    const reps = splitTop(cs.backgroundRepeat || '');
+    const at = (list, i) => (list.length ? list[i % list.length].trim() : '');
     // CSS lists the top layer first, Figma wants it last.
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i].trim();
       const url = /^url\(\s*["']?(.*?)["']?\s*\)$/.exec(layer);
       if (url) {
-        if (S.opts.images) fills.push({ type: 'IMAGE', ref: imageRef(url[1], null), scaleMode: /contain/.test(sizes[i] || '') ? 'FIT' : 'FILL' });
+        if (S.opts.images) {
+          const size = at(sizes, i) || 'auto';
+          let bg = null;
+          // cover/contain map to Figma's FILL/FIT; anything else (icons placed with
+          // a length size and a position, tiles) is composed at the box size.
+          if (!/cover|contain/.test(size) && size !== '100% 100%' && box.w > 0 && box.h > 0) {
+            const n = (p) => parseFloat(cs[p]) || 0;
+            bg = { w: r2(box.w), h: r2(box.h), size, px: at(posX, i) || '0%', py: at(posY, i) || '0%', repeat: at(reps, i) || 'repeat',
+              ox: n('borderLeftWidth'), oy: n('borderTopWidth'), aw: r2(box.w - n('borderLeftWidth') - n('borderRightWidth')), ah: r2(box.h - n('borderTopWidth') - n('borderBottomWidth')) };
+          }
+          fills.push({ type: 'IMAGE', ref: imageRef(url[1], null, bg), scaleMode: /contain/.test(size) ? 'FIT' : 'FILL' });
+        }
       } else {
         const g = gradientPaint(layer, box.w, box.h);
         if (g) fills.push(g);
@@ -1098,22 +1168,40 @@ function backgroundFills(cs, box) {
   return fills;
 }
 
-function borders(cs) {
+// 3D border styles: Chrome shades each side (calibrated on the default <hr>,
+// gray inset → top 154, bottom 238).
+const BEVEL_DARK = { inset: ['t', 'l'], groove: ['t', 'l'], outset: ['b', 'r'], ridge: ['b', 'r'] };
+function bevel(col, side, style) {
+  const k = BEVEL_DARK[style].includes(side) ? 0.2 : 0.86;
+  return { r: col.r + (1 - col.r) * k, g: col.g + (1 - col.g) * k, b: col.b + (1 - col.b) * k, a: col.a };
+}
+
+function borders(cs, box) {
   const weights = {};
+  const cols = {};
   let paint = null;
   let style = null;
   for (const s of SIDES) {
     let w = parseFloat(cs[`border${s}Width`]) || 0;
     const st = cs[`border${s}Style`];
-    const col = parseColor(cs[`border${s}Color`]);
+    let col = parseColor(cs[`border${s}Color`]);
     if (st === 'none' || st === 'hidden' || !col || col.a === 0) w = 0;
+    const side = s[0].toLowerCase();
+    if (w > 0 && BEVEL_DARK[st]) col = bevel(col, side, st);
+    if (w > 0) cols[side] = col;
     if (w > 0 && !paint) {
       paint = solid(col);
-      style = st;
+      style = BEVEL_DARK[st] ? 'solid' : st;
     }
-    weights[s[0].toLowerCase()] = r2(w);
+    weights[side] = r2(w);
   }
   if (!paint) return null;
+  // A rule (<hr>): no content area and two colors — fill with the bottom
+  // color, top border as an inside stroke.
+  const key = (c) => (c ? [c.r, c.g, c.b, c.a].map((v) => Math.round(v * 255)).join() : '');
+  if (box && cols.t && cols.b && key(cols.t) !== key(cols.b) && box.h <= weights.t + weights.b + 0.5) {
+    return { paint: solid(cols.t), weights: { t: weights.t, r: 0, b: 0, l: 0 }, dash: null, fillOverride: [solid(cols.b)] };
+  }
   const max = Math.max(weights.t, weights.r, weights.b, weights.l);
   const dash = style === 'dashed' ? [max * 3, max * 2] : style === 'dotted' ? [max, max] : null;
   return { paint, weights, dash };
@@ -1813,11 +1901,12 @@ function looseText(tn, parent, ox, oy) {
 
 // ---------- replaced elements ----------
 
-function imageRef(url, el) {
-  let it = S.images.get(url);
+function imageRef(url, el, bg) {
+  const key = bg ? url + '|' + JSON.stringify(bg) : url;
+  let it = S.images.get(key);
   if (!it) {
-    it = { ref: 'img' + S.images.size, url, el };
-    S.images.set(url, it);
+    it = { ref: 'img' + S.images.size, url, el, bg: bg || null };
+    S.images.set(key, it);
   } else if (!it.el && el) {
     it.el = el;
   }
@@ -1860,25 +1949,64 @@ function formNode(el, cs, box, rect, tag) {
   const f = boxed('FRAME', tag.toLowerCase() + (tag === 'INPUT' ? `[${type}]` : ''), box, v, v.fills);
   f.clip = true;
   f.children = [];
+  const native = cs.appearance !== 'none';
   if (type === 'checkbox' || type === 'radio') {
-    if (!v.has) {
-      f.fills = [solid(el.checked ? { r: 0.05, g: 0.6, b: 1, a: 1 } : { r: 1, g: 1, b: 1, a: 1 })];
-      f.stroke = { paint: solid({ r: 0.55, g: 0.55, b: 0.58, a: 1 }), weights: { t: 1, r: 1, b: 1, l: 1 }, dash: null };
-      const rr = type === 'radio' ? box.w / 2 : 3;
-      f.radii = { tl: rr, tr: rr, br: rr, bl: rr };
-    }
+    if (!native) return f; // the author's box + materialized ::before/::after
+    f.children.push(checkGlyph(el, cs, box, type));
+    // Chrome ignores the author's background and border on a native control.
+    f.fills = [];
+    f.stroke = null;
+    f.radii = null;
     return f;
   }
-  if (/^(range|color|file|image)$/.test(type)) return f;
+  if (type === 'range') {
+    rangeParts(el, cs, box, f, native);
+    return f;
+  }
+  if (type === 'color') {
+    const cb = contentBox(el, cs);
+    const c = parseColor(el.value) || { r: 0, g: 0, b: 0, a: 1 };
+    const sw = { x: r2(cb.x - rect.left + 2), y: r2(cb.y - rect.top + 4), w: r2(Math.max(1, cb.w - 4)), h: r2(Math.max(1, cb.h - 8)) };
+    f.children.push(Object.assign({ type: 'RECT', name: 'swatch', fills: [solid(c)], stroke: { paint: solid({ r: 0.47, g: 0.47, b: 0.47, a: 1 }), weights: { t: 1, r: 1, b: 1, l: 1 }, dash: null } }, sw));
+    return f;
+  }
+  if (type === 'file') {
+    fileParts(el, cs, box, f);
+    return f;
+  }
+  if (type === 'image') return f;
 
   let text = '';
   let placeholder = false;
+  const dateLike = tag === 'INPUT' && /^(date|time|month|week|datetime-local)$/.test(type);
+  const menulist = tag === 'SELECT' && native && !el.multiple && !(el.size > 1);
   if (tag === 'SELECT') text = el.selectedIndex >= 0 ? el.options[el.selectedIndex].text : '';
+  else if (dateLike) text = dateText(el, type);
   else {
     text = el.value;
     if (!text && el.placeholder) {
       text = el.placeholder;
       placeholder = true;
+    }
+  }
+  // Native widgets: the select chevron and the date/time picker icon.
+  let iconW = 0;
+  if (menulist || (dateLike && !pickerHidden(el))) {
+    const col = toCss(parseColor(cs.color) || { r: 0, g: 0, b: 0, a: 1 });
+    if (menulist) {
+      const bw = parseFloat(cs.borderRightWidth) || 0;
+      f.children.push({ type: 'SVG', name: 'chevron', x: r2(box.w - bw - 4 - 10), y: r2((box.h - 6) / 2), w: 10, h: 6,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="${col}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>` });
+    } else {
+      const cb = contentBox(el, cs);
+      const k = Math.max(0.75, (parseFloat(cs.fontSize) || 16) / 16);
+      const sz = r2(12 * k);
+      const glyph = type === 'time'
+        ? `<circle cx="6" cy="6" r="5" fill="none" stroke="${col}" stroke-width="1.2"/><path d="M6 3v3l2 1.5" fill="none" stroke="${col}" stroke-width="1.2"/>`
+        : `<rect x="1" y="2" width="10" height="9" rx="1" fill="none" stroke="${col}" stroke-width="1.2"/><path d="M1 4.5h10M3.5 1v2M8.5 1v2" stroke="${col}" stroke-width="1.2"/>`;
+      f.children.push({ type: 'SVG', name: 'picker', x: r2(cb.x - rect.left + cb.w - sz - 3), y: r2(cb.y - rect.top + (cb.h - sz) / 2), w: sz, h: sz,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}" viewBox="0 0 12 12">${glyph}</svg>` });
+      iconW = sz + 8;
     }
   }
   if (type === 'password' && !placeholder) text = '•'.repeat(text.length);
@@ -1887,7 +2015,8 @@ function formNode(el, cs, box, rect, tag) {
   const segs = toSegments([{ raw: text, el }], placeholder ? css(el, '::placeholder').color : null);
   if (!segs.length) return f;
   const cb = contentBox(el, cs);
-  const x = cb.x - rect.left;
+  cb.w = Math.max(1, cb.w - iconW);
+  const x = cb.x - rect.left + (menulist ? 4 : 0); // Chrome's menulist inner padding
   if (tag === 'TEXTAREA') {
     f.children.push(textNode(segs, { x, y: cb.y - rect.top, w: cb.w, h: cb.h, align: ALIGN[cs.textAlign] || 'LEFT', autoResize: 'HEIGHT' }, cs));
   } else {
@@ -1912,6 +2041,206 @@ function formNode(el, cs, box, rect, tag) {
     }
   }
   return f;
+}
+
+function toCss(c) {
+  const h = (v) => Math.round(clamp01(v) * 255).toString(16).padStart(2, '0');
+  return '#' + h(c.r) + h(c.g) + h(c.b);
+}
+
+function accentOf(cs) {
+  return (cs.accentColor && cs.accentColor !== 'auto' && parseColor(cs.accentColor)) || { r: 0, g: 117 / 255, b: 1, a: 1 };
+}
+
+// Chrome's native checkbox / radio, drawn as SVG in the control's box.
+function checkGlyph(el, cs, box, type) {
+  const ac = accentOf(cs);
+  const hex = toCss(ac);
+  const lum = 0.2126 * ac.r + 0.7152 * ac.g + 0.0722 * ac.b;
+  const mark = lum > 0.6 ? '#1a1a1a' : '#ffffff';
+  const sz = Math.min(box.w, box.h), ox = (box.w - sz) / 2, oy = (box.h - sz) / 2, k = sz / 13;
+  const on = el.checked || (type === 'checkbox' && el.indeterminate);
+  let body = '';
+  if (type === 'checkbox') {
+    body += `<rect x="${ox + 0.5 * k}" y="${oy + 0.5 * k}" width="${12 * k}" height="${12 * k}" rx="${2 * k}" fill="${on ? hex : '#ffffff'}" stroke="${on ? hex : '#767676'}" stroke-width="${k}"/>`;
+    if (el.indeterminate) body += `<rect x="${ox + 3 * k}" y="${oy + 5.75 * k}" width="${7 * k}" height="${1.5 * k}" fill="${mark}"/>`;
+    else if (el.checked) body += `<path transform="translate(${ox} ${oy}) scale(${k})" d="M3 6.6l2.3 2.3L10 4.2" fill="none" stroke="${mark}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`;
+  } else {
+    const cx = ox + sz / 2, cy = oy + sz / 2;
+    body += `<circle cx="${cx}" cy="${cy}" r="${6 * k}" fill="#ffffff" stroke="${el.checked ? hex : '#767676'}" stroke-width="${k}"/>`;
+    if (el.checked) body += `<circle cx="${cx}" cy="${cy}" r="${3.5 * k}" fill="${hex}"/>`;
+  }
+  const n = { type: 'SVG', name: type, x: 0, y: 0, w: box.w, h: box.h,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${box.w}" height="${box.h}" viewBox="0 0 ${box.w} ${box.h}">${body}</svg>` };
+  if (el.disabled) n.opacity = 0.5;
+  return n;
+}
+
+// Background of a ::-webkit-* pseudo (getComputedStyle can't read those): the
+// last matching author rule, resolved through a probe. Specificity is ignored.
+function pseudoBg(el, pseudo) {
+  let val = null;
+  const visit = (rules) => {
+    for (const r of rules) {
+      try {
+        if (r.selectorText && r.selectorText.indexOf(pseudo) >= 0) {
+          for (const part of r.selectorText.split(',')) {
+            const p = part.trim();
+            const i = p.indexOf(pseudo);
+            if (i < 0) continue;
+            if (el.matches(p.slice(0, i) || '*')) val = r.style.backgroundColor || r.style.background || val;
+          }
+        }
+        if (r.cssRules) visit(r.cssRules);
+      } catch (e) {}
+    }
+  };
+  for (const sh of S.doc.styleSheets) { try { visit(sh.cssRules); } catch (e) { /* cross-origin */ } }
+  if (!val) return null;
+  const probe = S.doc.createElement('span');
+  probe.style.background = val;
+  (el.parentNode || S.doc.body).appendChild(probe);
+  const c = parseColor(getComputedStyle(probe).backgroundColor);
+  probe.remove();
+  return c && c.a > 0 ? c : null;
+}
+
+function meterNode(el, cs, box, tag) {
+  const v = boxVisual(el, cs, box);
+  const native = cs.appearance !== 'none';
+  const gray = { r: 0.94, g: 0.94, b: 0.94, a: 1 };
+  let frac = 0, bar = null, track;
+  if (tag === 'PROGRESS') {
+    track = pseudoBg(el, '::-webkit-progress-bar') || gray;
+    bar = pseudoBg(el, '::-webkit-progress-value') || accentOf(cs);
+    frac = el.position >= 0 ? el.position : -1;
+  } else {
+    track = pseudoBg(el, '::-webkit-meter-bar') || gray;
+    const min = el.min, max = el.max, val = el.value;
+    frac = max > min ? (val - min) / (max - min) : 0;
+    const low = el.low, high = el.high, opt = el.optimum;
+    const region = (x) => (x < low ? 0 : x > high ? 2 : 1);
+    const dist = Math.abs(region(val) - region(opt));
+    bar = pseudoBg(el, ['::-webkit-meter-optimum-value', '::-webkit-meter-suboptimum-value', '::-webkit-meter-even-less-good-value'][dist])
+      || [{ r: 0.06, g: 0.49, b: 0.06, a: 1 }, { r: 1, g: 0.73, b: 0, a: 1 }, { r: 0.85, g: 0.23, b: 0.004, a: 1 }][dist];
+  }
+  const styled = track !== gray;
+  if (native && !styled && !v.stroke && !v.fills.length) {
+    // Chrome paints a thin rounded bar centered in the box.
+    const f = boxed('FRAME', tag.toLowerCase(), box, v, []);
+    const t = Math.min(box.h, 6), y = r2((box.h - t) / 2), rr = { tl: t / 2, tr: t / 2, br: t / 2, bl: t / 2 };
+    f.children = [{ type: 'RECT', name: 'track', x: 0, y, w: box.w, h: t, fills: [solid({ r: 0.9, g: 0.9, b: 0.9, a: 1 })], radii: rr }];
+    if (frac > 0) f.children.push({ type: 'RECT', name: 'value', x: 0, y, w: r2(box.w * clamp01(frac)), h: t, fills: [solid(bar)], radii: rr });
+    return f;
+  }
+  const f = boxed('FRAME', tag.toLowerCase(), box, v, v.fills.length ? v.fills : [solid(track)]);
+  f.clip = true;
+  f.children = [];
+  if (frac > 0) {
+    f.children.push({ type: 'RECT', name: 'value', x: 0, y: 0, w: r2(box.w * clamp01(frac)), h: box.h, fills: [solid(bar)] });
+  }
+  return f;
+}
+
+function rangeParts(el, cs, box, f, native) {
+  const min = parseFloat(el.min) || 0, max = el.max === '' ? 100 : parseFloat(el.max);
+  const frac = max > min ? clamp01(((parseFloat(el.value) || 0) - min) / (max - min)) : 0;
+  const ac = accentOf(cs);
+  const thumbC = native ? ac : pseudoBg(el, '::-webkit-slider-thumb') || ac;
+  const t = Math.min(16, box.h), cy = box.h / 2;
+  const R = (name, x, y, w, h, fill, r) => ({ type: 'RECT', name, x: r2(x), y: r2(y), w: r2(w), h: r2(h), fills: [solid(fill)], radii: { tl: r, tr: r, br: r, bl: r } });
+  if (native) {
+    f.fills = [];
+    f.stroke = null;
+    const th = 4;
+    const track = R('track', 0, cy - th / 2, box.w, th, { r: 0.94, g: 0.94, b: 0.94, a: 1 }, th / 2);
+    track.stroke = { paint: solid({ r: 0.7, g: 0.7, b: 0.7, a: 1 }), weights: { t: 1, r: 1, b: 1, l: 1 }, dash: null };
+    f.children.push(track, R('fill', 0, cy - th / 2, t / 2 + frac * (box.w - t), th, ac, th / 2));
+  }
+  f.clip = false;
+  f.children.push(R('thumb', frac * (box.w - t), cy - t / 2, t, t, thumbC, t / 2));
+}
+
+function fileParts(el, cs, box, f) {
+  const bs = getComputedStyle(el, '::file-selector-button');
+  const bw = parseFloat(bs.width), bh = parseFloat(bs.height);
+  const label = el.files && el.files.length ? (el.files.length > 1 ? `${el.files.length} files` : el.files[0].name) : 'No file chosen';
+  let x = 0;
+  if (bw > 0 && bh > 0 && bs.display !== 'none') {
+    const bbox = { x: 0, y: r2((box.h - bh) / 2), w: r2(bw), h: r2(bh) };
+    const v = boxVisual(el, bs, bbox);
+    const b = boxed('FRAME', 'button', bbox, v, v.fills);
+    b.children = [];
+    const segs = toSegments([{ raw: el.multiple ? 'Choose Files' : 'Choose File', el }], bs.color);
+    const blh = parseFloat(bs.lineHeight) || (parseFloat(bs.fontSize) || 13) * 1.2;
+    if (segs.length) b.children.push(textNode(segs, { x: 0, y: r2((bbox.h - blh) / 2), w: bbox.w, h: blh, align: 'CENTER', autoResize: 'HEIGHT' }, null));
+    f.children.push(b);
+    x = bw + (parseFloat(bs.marginRight) || 4);
+  }
+  const segs = toSegments([{ raw: label, el }]);
+  const lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 13) * 1.2;
+  if (segs.length) f.children.push(textNode(segs, { x: r2(x), y: r2((box.h - lh) / 2), w: r2(Math.max(1, box.w - x)), h: lh, align: 'LEFT', autoResize: 'WIDTH_AND_HEIGHT' }, cs));
+}
+
+// What a date/time input shows: the value in the browser's locale, or the field pattern.
+function dateText(el, type) {
+  const loc = undefined;
+  const v = el.value;
+  try {
+    if (v) {
+      if (type === 'time') {
+        const m = /^(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v);
+        if (m) return new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit', second: m[3] ? '2-digit' : undefined }).format(new Date(2000, 0, 1, +m[1], +m[2], +(m[3] || 0)));
+      } else if (type === 'week') {
+        const m = /^(\d{4})-W(\d{2})$/.exec(v);
+        if (m) return `Week ${m[2]}, ${m[1]}`;
+      } else {
+        const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(v);
+        if (m) {
+          const d = new Date(+m[1], +m[2] - 1, +(m[3] || 1), +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+          const date = { year: 'numeric', month: '2-digit', day: '2-digit' };
+          if (type === 'month') return new Intl.DateTimeFormat(loc, { year: 'numeric', month: 'long' }).format(d);
+          if (type === 'datetime-local') return new Intl.DateTimeFormat(loc, Object.assign({ hour: '2-digit', minute: '2-digit' }, date)).format(d);
+          return new Intl.DateTimeFormat(loc, date).format(d);
+        }
+      }
+      return v;
+    }
+    const words = { ru: ['гггг', 'мм', 'дд'], de: ['JJJJ', 'MM', 'TT'], fr: ['aaaa', 'mm', 'jj'], es: ['aaaa', 'mm', 'dd'] }[(navigator.language || 'en').slice(0, 2)] || ['yyyy', 'mm', 'dd'];
+    const pat = new Intl.DateTimeFormat(loc, { year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(2000, 0, 2))
+      .map((p) => (p.type === 'year' ? words[0] : p.type === 'month' ? words[1] : p.type === 'day' ? words[2] : p.value)).join('');
+    const time = '--:--';
+    if (type === 'time') return time;
+    if (type === 'month') return '--------- ----';
+    if (type === 'week') return 'Week --, ----';
+    if (type === 'datetime-local') return `${pat}, ${time}`;
+    return pat;
+  } catch (e) {
+    return v;
+  }
+}
+
+function pickerHidden(el) {
+  for (const sh of S.doc.styleSheets) {
+    let rules;
+    try { rules = sh.cssRules; } catch (e) { continue; }
+    const hit = (function visit(list) {
+      for (const r of list) {
+        try {
+          if (r.selectorText && r.selectorText.indexOf('-webkit-calendar-picker-indicator') >= 0) {
+            for (const sel of r.selectorText.split(',')) {
+              const base = sel.split('::-webkit-calendar-picker-indicator')[0].trim() || '*';
+              if (el.matches(base) && (r.style.display === 'none' || r.style.opacity === '0' || r.style.visibility === 'hidden' || r.style.backgroundImage)) return true;
+            }
+          }
+          if (r.cssRules && visit(r.cssRules)) return true;
+        } catch (e) {}
+      }
+      return false;
+    })(rules);
+    if (hit) return true;
+  }
+  return false;
 }
 
 // Inline SVG is copied with its computed paint baked into attributes,
@@ -2056,7 +2385,7 @@ async function loadImages(list, onProgress, budgetMs = 30000) {
     while (queue.length && !all.signal.aborted) {
       const it = queue.shift();
       try {
-        const r = await imageBytes(it.url, it.el, all.signal);
+        const r = await imageBytes(it.url, it.el, all.signal, it.bg);
         it.bytes = r.bytes;
         if (r.slow) it.slow = true;
       } catch (e) { it.bytes = null; }
@@ -2079,13 +2408,13 @@ function sniff(b) {
 }
 
 // Figma accepts PNG/JPEG/GIF up to 4096px; everything else is re-encoded as PNG.
-async function imageBytes(url, el, outer) {
+async function imageBytes(url, el, outer, bg) {
   const st = { slow: false };
-  const bytes = await imageBytesInner(url, el, outer, (v) => { st.slow = v; });
+  const bytes = await imageBytesInner(url, el, outer, (v) => { st.slow = v; }, bg);
   return { bytes, slow: !bytes && st.slow };
 }
 
-async function imageBytesInner(url, el, outer, setSlow) {
+async function imageBytesInner(url, el, outer, setSlow, bg) {
   let blob = null;
   const ac = new AbortController();
   const t = _setTimeout(() => ac.abort(), 12000); // includes Chrome's cache-lock wait on the <img> request
@@ -2102,6 +2431,9 @@ async function imageBytesInner(url, el, outer, setSlow) {
     if (outer) outer.removeEventListener('abort', onOuter);
   }
 
+  if (blob && bg) {
+    try { return await composeBackground(blob, bg); } catch (e) { /* fall back to the plain image */ }
+  }
   if (blob) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     let bmp = null;
@@ -2120,6 +2452,51 @@ async function imageBytesInner(url, el, outer, setSlow) {
     try { return await toPng(el, el.naturalWidth, el.naturalHeight); } catch (e) {}
   }
   return null;
+}
+
+// One background layer as the browser paints it over the box: background-size,
+// background-position (in the padding box) and background-repeat.
+async function composeBackground(blob, bg) {
+  let src = null, nw = 0, nh = 0;
+  try { src = await createImageBitmap(blob); nw = src.width; nh = src.height; } catch (e) {
+    src = await loadImg(URL.createObjectURL(blob));
+    nw = src.naturalWidth;
+    nh = src.naturalHeight;
+  }
+  const len = (v, ref) => (v === 'auto' ? null : /%$/.test(v) ? parseFloat(v) / 100 * ref : parseFloat(v));
+  const sz = bg.size.split(/\s+/);
+  let tw = len(sz[0], bg.aw), th = len(sz[1] || 'auto', bg.ah);
+  if (tw == null && th == null) {
+    if (nw && nh) { tw = nw; th = nh; } else { const k = Math.min(bg.aw / (nw || 1), bg.ah / (nh || 1)); tw = (nw || 1) * k; th = (nh || 1) * k; }
+  } else if (tw == null) tw = nh ? th * nw / nh : th;
+  else if (th == null) th = nw ? tw * nh / nw : tw;
+  if (!(tw > 0 && th > 0)) throw new Error('empty tile');
+  const pos = (v, free) => {
+    const c = /^calc\(\s*(-?[\d.]+)%\s*([+-])\s*(-?[\d.]+)px\s*\)$/.exec(v);
+    if (c) return free * parseFloat(c[1]) / 100 + (c[2] === '-' ? -1 : 1) * parseFloat(c[3]);
+    if (/%$/.test(v)) return free * parseFloat(v) / 100;
+    if (/px$/.test(v)) return parseFloat(v);
+    return /right|bottom/.test(v) ? free : /center/.test(v) ? free / 2 : 0;
+  };
+  const x0 = bg.ox + pos(bg.px, bg.aw - tw), y0 = bg.oy + pos(bg.py, bg.ah - th);
+  const rp = bg.repeat.split(/\s+/);
+  const rx = rp.length > 1 ? rp[0] : rp[0] === 'repeat-y' ? 'no-repeat' : rp[0] === 'repeat-x' ? 'repeat' : rp[0];
+  const ry = rp.length > 1 ? rp[1] : rp[0] === 'repeat-x' ? 'no-repeat' : rp[0] === 'repeat-y' ? 'repeat' : rp[0];
+  const k = Math.min(2, 4096 / Math.max(bg.w, bg.h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bg.w * k));
+  c.height = Math.max(1, Math.round(bg.h * k));
+  const ctx = c.getContext('2d');
+  ctx.scale(k, k);
+  const xs = rx === 'no-repeat' ? [x0] : [];
+  if (rx !== 'no-repeat') for (let x = x0 - Math.ceil(x0 / tw) * tw; x < bg.w; x += tw) xs.push(x);
+  const ys = ry === 'no-repeat' ? [y0] : [];
+  if (ry !== 'no-repeat') for (let y = y0 - Math.ceil(y0 / th) * th; y < bg.h; y += th) ys.push(y);
+  if (xs.length * ys.length > 20000) throw new Error('too many tiles');
+  for (const x of xs) for (const y of ys) ctx.drawImage(src, x, y, tw, th);
+  const out = await new Promise((r) => c.toBlob(r, 'image/png'));
+  if (!out) throw new Error('canvas export failed');
+  return new Uint8Array(await out.arrayBuffer());
 }
 
 function loadImg(src) {
