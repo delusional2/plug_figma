@@ -253,9 +253,8 @@ async function prepareImages(list) {
         continue;
       } catch (e) {}
     }
-    // The UI could not read the file (usually CORS) — let Figma try the URL itself,
-    // unless the UI already gave up on it as too slow (it gets the placeholder).
-    if (!im.slow && im.url && /^https?:/i.test(im.url)) remote.push(im);
+    // The UI could not read the file (CORS, or too slow there) — let Figma try the URL itself.
+    if (im.url && /^https?:/i.test(im.url)) remote.push(im);
   }
   let next = 0;
   let settled = 0;
