@@ -467,6 +467,7 @@ function materializePseudos() {
   if (!d.body) return;
   S.pseudo = new WeakMap();
   const recs = [];
+  const lis = [];
   // Counters in document order (counter-reset scopes end with the parent).
   const stacks = new Map();
   const inst = (name) => { const s = stacks.get(name); return s && s.length ? s[s.length - 1] : null; };
@@ -523,6 +524,7 @@ function materializePseudos() {
     const cs = getComputedStyle(el);
     if (cs.display === 'none') return owned;
     applyCounters(cs, owned, /list-item/.test(cs.display));
+    if (/list-item/.test(cs.display)) lis.push(el);
     const canHost = !NO_PSEUDO_TAGS.has(tag) && el !== d.body.parentNode;
     const b = canHost ? readPseudo(el, '::before') : null;
     if (b) recs.push(b);
@@ -533,7 +535,7 @@ function materializePseudos() {
     if (a) recs.push(a);
     return owned;
   })(d.body);
-  if (!recs.length) return;
+  if (!recs.length && !lis.length) return;
 
   const style = d.createElement('style');
   style.textContent = '[data-h2f-b]::before{content:none!important}[data-h2f-a]::after{content:none!important}' + PSEUDO_TAG + '{display:inline}';
@@ -592,6 +594,17 @@ function materializePseudos() {
   layer.setAttribute('data-h2f-proxy', '');
   layer.style.cssText = 'all:initial!important;position:fixed!important;left:0!important;top:0!important;width:0!important;height:0!important;display:block!important;pointer-events:none!important;z-index:2147483647!important';
   d.documentElement.appendChild(layer);
+  const addProxy = (el, which, node) => {
+    const e = S.pseudo.get(el) || { before: [], after: [] };
+    e[which].push(node);
+    S.pseudo.set(el, e);
+  };
+
+  // List markers: inside ones become real inline text, outside ones are
+  // measured with a probe and placed in the proxy layer.
+  for (const li of lis) {
+    try { materializeMarker(li, layer, addProxy); } catch (e) { console.warn('html-to-figma: skipped a list marker', e); }
+  }
   for (const r of recs) {
     if (!r.oof) continue;
     try {
@@ -621,13 +634,76 @@ function materializePseudos() {
       layer.appendChild(proxy);
       mark(r, true);
       r.span = span;
-      const e = S.pseudo.get(r.el) || { before: [], after: [] };
-      e[r.p === '::before' ? 'before' : 'after'].push(span);
-      S.pseudo.set(r.el, e);
+      addProxy(r.el, r.p === '::before' ? 'before' : 'after', span);
     } catch (e) {
       console.warn('html-to-figma: skipped a pseudo-element', e);
     }
   }
+}
+
+function listOrdinal(li) {
+  const p = li.parentElement;
+  if (!p) return 1;
+  const sibs = [...p.children].filter((c) => /list-item/.test(getComputedStyle(c).display));
+  const ol = p.tagName === 'OL';
+  const rev = ol && p.reversed;
+  let n = ol && p.hasAttribute('start') ? p.start : rev ? sibs.length : 1;
+  for (let i = 0; i < sibs.length; i++) {
+    if (i > 0) n += rev ? -1 : 1;
+    if (sibs[i].hasAttribute('value')) n = parseInt(sibs[i].getAttribute('value'), 10) || 0;
+    if (sibs[i] === li) return n;
+  }
+  return 1;
+}
+
+function materializeMarker(li, layer, addProxy) {
+  const d = S.doc;
+  const cs = getComputedStyle(li);
+  const ms = getComputedStyle(li, '::marker');
+  if (li.tagName === 'SUMMARY') {
+    try { if (getComputedStyle(li, '::-webkit-details-marker').display === 'none') return; } catch (e) {}
+  }
+  let text = null, img = null;
+  const lst = cs.listStyleType;
+  const imgM = /^url\(\s*["']?(.*?)["']?\s*\)$/.exec(cs.listStyleImage || '');
+  if (/^["']/.test(ms.content || '')) text = (contentTokens(ms.content)[0] || {}).str || '';
+  else if (ms.content === 'none') return;
+  else if (imgM) img = imgM[1];
+  else if (/^["']/.test(lst)) text = (contentTokens(lst)[0] || {}).str || '';
+  else if (lst === 'none') return;
+  else {
+    const symbolic = /^(disc|circle|square|disclosure-open|disclosure-closed)$/.test(lst);
+    text = fmtCounter(symbolic ? 0 : listOrdinal(li), lst) + (symbolic ? ' ' : '. ');
+  }
+  if (!img && !/\S/.test(text || '')) return;
+  const span = d.createElement(PSEUDO_TAG);
+  span.setAttribute('data-h2f-pseudo', 'marker');
+  const font = ['color', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant-numeric', 'line-height', 'letter-spacing']
+    .map((k) => `${k}:${(k === 'line-height' ? cs : ms).getPropertyValue(k)} !important`).join(';');
+  if (img) {
+    const im = d.createElement('img');
+    im.src = img;
+    im.style.cssText = 'all:initial!important;vertical-align:baseline!important';
+    span.appendChild(im);
+  } else {
+    span.appendChild(d.createTextNode(text));
+  }
+  if (cs.listStylePosition === 'inside') {
+    span.style.cssText = `display:inline!important;white-space:pre!important;${font}`;
+    li.insertBefore(span, li.firstChild);
+    li.style.setProperty('list-style-type', 'none', 'important');
+    li.style.setProperty('list-style-image', 'none', 'important');
+    return;
+  }
+  // Outside: right edge at the content start, on the first line box.
+  span.style.cssText = `position:absolute!important;white-space:pre!important;transform:translateX(-100%)!important;display:inline!important;${font}`;
+  li.insertBefore(span, li.firstChild);
+  const r = span.getBoundingClientRect();
+  span.remove();
+  if (!(r.width > 0 && r.height > 0)) return;
+  span.style.cssText = `position:absolute!important;white-space:pre!important;display:block!important;left:${r.left}px!important;top:${r.top}px!important;${font}`;
+  layer.appendChild(span);
+  addProxy(li, 'before', span);
 }
 
 // Layers of the out-of-flow pseudo-elements of el (see materializePseudos).
@@ -857,11 +933,16 @@ function walkEl(el, ox, oy) {
       const boxes = painted ? inlineBoxes(painted) : [];
       const clipped = visual.clip && t.overflowsBox;
       delete t.overflowsBox;
-      const pl = pseudoLayers(el, rect.left, rect.top);
-      if (!visual.has && !clipped && !boxes.length && !pl) {
+      const hasPseudo = !!(S.pseudo && S.pseudo.get(el));
+      if (!visual.has && !clipped && !boxes.length && (!hasPseudo || (!visual.clip && common.opacity === undefined))) {
+        // Out-of-flow pseudo-elements and list markers become absolute siblings,
+        // so the text stays one layer in the parent's Auto Layout.
         shift(t, ox, oy);
-        return [Object.assign(t, common)];
+        const sib = pseudoLayers(el, ox, oy);
+        Object.assign(t, common);
+        return sib ? paintOrder(sib.before.concat([t], sib.after)) : [t];
       }
+      const pl = pseudoLayers(el, rect.left, rect.top);
       shift(t, rect.left, rect.top);
       boxes.forEach((b) => shift(b, rect.left, rect.top));
       const kids = pl ? pl.before.concat(boxes, [t], pl.after) : boxes.concat([t]);
