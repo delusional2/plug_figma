@@ -1091,14 +1091,29 @@ function frameNode(el, box, visual, common, children) {
   };
 }
 
+// Utility classes (Tailwind and friends) say nothing about what a layer is.
+const UTIL_CLASS = /^(?:!|-)?(?:flex|inline|block|grid|hidden|contents|table|flow-root|static|relative|absolute|fixed|sticky|isolate|container|visible|invisible|collapse|truncate|uppercase|lowercase|capitalize|italic|underline|line-through|antialiased|subpixel-antialiased|sr-only|not-sr-only|group|peer|grow|shrink|transform|transition|d|m[trblxyse]?|p[trblxyse]?|gap|space|w|h|min|max|size|text|font|leading|tracking|bg|from|via|to|border|divide|outline|ring|rounded|shadow|drop|opacity|z|top|left|right|bottom|inset|start|end|items|justify|self|place|content|order|col|row|basis|overflow|overscroll|object|aspect|translate|rotate|scale|skew|origin|duration|ease|delay|animate|cursor|select|pointer|resize|fill|stroke|backdrop|blur|brightness|line|whitespace|break|list|decoration|align|columns|float|clear|mix|filter|scroll|snap|touch|will|accent|caret|appearance|shrink-0|sm|md|lg|xl|dark|hover|focus)(?:-|$)/;
+const GENERIC_TAGS = /^(div|span|section|article|aside|header|footer|nav|main|li|a|button|label|form)$/;
+
 function nameFor(el) {
   const pseudo = el.getAttribute('data-h2f-pseudo');
   if (pseudo) return pseudo;
   const tag = el.tagName.toLowerCase();
-  const label = el.getAttribute('aria-label') || el.id;
-  if (label) return `${tag} · ${label}`.slice(0, 60);
-  const cls = (el.getAttribute('class') || '').trim().split(/\s+/)[0];
-  return cls ? `${tag}.${cls}`.slice(0, 60) : tag;
+  const label = el.getAttribute('aria-label') || el.getAttribute('data-name') || el.id || el.getAttribute('title');
+  if (label) return `${tag} · ${label.trim()}`.slice(0, 60);
+  const role = el.getAttribute('role');
+  const cls = [...el.classList].find((c) => !/[:\[\]\/]/.test(c) && !UTIL_CLASS.test(c));
+  const base = `${role || tag}${cls ? '.' + cls : ''}`;
+  if (cls || !GENERIC_TAGS.test(tag) || el === S.doc.body) return base.slice(0, 60);
+  // A content hint for generic containers: their heading, or their own short text.
+  let src = /^(a|button|label|li)$/.test(tag) ? el : el.querySelector('h1,h2,h3,h4,h5,h6');
+  if (!src) {
+    const all = el.textContent || '';
+    if (all.length > 200) return base;
+    src = el;
+  }
+  const hint = (src.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 32);
+  return (hint ? `${base} · ${hint}` : base).slice(0, 60);
 }
 
 // ---------- box styles ----------
@@ -1307,32 +1322,47 @@ function toRadians(v) {
   return n * Math.PI / 180;
 }
 
+const SPACE_RE = /(?:^|\s)in\s+([a-z0-9-]+)(?:\s+(shorter|longer|increasing|decreasing)\s+hue)?/i;
+
+// Figma paints from a gradient's stops and a transform; CSS shape, size, position,
+// repetition, interpolation space and premultiplied alpha are all baked into those.
 function gradientPaint(str, w, h) {
-  const m = /^(?:repeating-)?(linear|radial|conic)-gradient\(([\s\S]*)\)$/.exec(str.trim());
+  const m = /^(repeating-)?(linear|radial|conic)-gradient\(([\s\S]*)\)$/.exec(str.trim());
   if (!m || !(w > 0) || !(h > 0)) return null;
-  const parts = splitTop(m[2]);
-  const kind = m[1];
+  const rep = !!m[1];
+  const kind = m[2];
+  const parts = splitTop(m[3]);
+  if (!parts.length) return null;
+  const isColor = (p) => !!parseColor(splitSpaces(p)[0] || '');
+  let pre = isColor(parts[0]) ? '' : parts.shift().trim();
+  let space = null, hueMode = 'shorter';
+  const sm = SPACE_RE.exec(pre);
+  if (sm) {
+    space = sm[1].toLowerCase();
+    if (sm[2]) hueMode = sm[2].toLowerCase();
+    pre = pre.replace(SPACE_RE, ' ').trim();
+  }
+  if (!space) space = parts.some((p) => /(?:^|\s)(?:oklch|oklab|lab|lch|color|color-mix)\(/i.test(p)) ? 'oklab' : 'srgb';
+  const finish = (raw) => interpStops(rep ? repeatStops(raw) : clipStops(raw), space, hueMode);
 
   if (kind === 'linear') {
-    const first = parts[0].trim();
     let dir = [0, 1];
-    if (/^to\s/.test(first)) {
-      const sx = /left/.test(first) ? -1 : /right/.test(first) ? 1 : 0;
-      const sy = /top/.test(first) ? -1 : /bottom/.test(first) ? 1 : 0;
+    if (/^to\s/.test(pre)) {
+      const sx = /left/.test(pre) ? -1 : /right/.test(pre) ? 1 : 0;
+      const sy = /top/.test(pre) ? -1 : /bottom/.test(pre) ? 1 : 0;
       // Corner directions are perpendicular to the opposite diagonal.
       dir = sx && sy ? [sx * h, sy * w] : [sx, sy];
-      parts.shift();
-    } else if (/^-?[\d.]+(deg|g?rad|turn)$/.test(first)) {
-      const a = toRadians(first);
+    } else if (/^-?[\d.]+(deg|g?rad|turn)$/.test(pre)) {
+      const a = toRadians(pre);
       dir = [Math.sin(a), -Math.cos(a)];
-      parts.shift();
     }
     const n = Math.hypot(dir[0], dir[1]) || 1;
     const dx = dir[0] / n;
     const dy = dir[1] / n;
     const len = Math.abs(w * dx) + Math.abs(h * dy);
-    const stops = parseStops(parts, len);
-    if (!stops || !len) return null;
+    const raw = len ? parseStops(parts, len) : null;
+    const stops = raw && finish(raw);
+    if (!stops) return null;
     // Gradient line in pixels, then a transform from the layer's unit square
     // into gradient space, where the gradient runs along x from 0 to 1.
     const Dx = dx * len;
@@ -1350,35 +1380,149 @@ function gradientPaint(str, w, h) {
     };
   }
 
-  // Radial and conic: shape/position keywords are ignored, centered on the layer.
-  if (parts.length && !parseColor(parts[0].trim().split(/\s+(?![^(]*\))/)[0])) parts.shift();
-  if (kind === 'radial') {
-    const stops = parseStops(parts, Math.hypot(w, h) / 2);
-    if (!stops) return null;
-    const k = Math.SQRT1_2;
-    return { type: 'GRADIENT_RADIAL', gradientTransform: [[k, 0, 0.5 - 0.5 * k], [0, k, 0.5 - 0.5 * k]], gradientStops: stops };
+  // Position after `at` (radial and conic).
+  let cx = w / 2, cy = h / 2;
+  const at = /(?:^|\s)at\s+(.*)$/.exec(pre);
+  const sizePart = at ? pre.slice(0, at.index).trim() : pre;
+  if (at) {
+    let t = splitSpaces(at[1]);
+    if (/^(top|bottom)$/.test(t[0]) || /^(left|right)$/.test(t[1] || '')) t = [t[1] || 'center', t[0]];
+    cx = resolveLen(t[0] || 'center', w);
+    cy = resolveLen(t[1] || 'center', h);
   }
-  const stops = parseStops(parts.map((p) => p.replace(/-?[\d.]+deg/g, (d) => `${parseFloat(d) / 3.6}%`)), 1);
+
+  if (kind === 'radial') {
+    const dl = Math.abs(cx), dr = Math.abs(w - cx), dt = Math.abs(cy), db = Math.abs(h - cy);
+    const sizeToks = splitSpaces(sizePart.replace(/\b(circle|ellipse)\b/g, ' '));
+    const lens = sizeToks.filter((t) => !/^(closest|farthest)-(side|corner)$/.test(t));
+    const circle = /\bcircle\b/.test(sizePart) || lens.length === 1;
+    const kw = (sizeToks.find((t) => /^(closest|farthest)-(side|corner)$/.test(t)) || 'farthest-corner');
+    const corners = [[0, 0], [w, 0], [0, h], [w, h]].map((c) => [Math.abs(c[0] - cx), Math.abs(c[1] - cy)]);
+    let rx, ry;
+    if (lens.length) {
+      rx = resolveLen(lens[0], w);
+      ry = circle ? rx : resolveLen(lens[1] || lens[0], h);
+    } else if (circle) {
+      const cd = corners.map((c) => Math.hypot(c[0], c[1]));
+      rx = ry = kw === 'closest-side' ? Math.min(dl, dr, dt, db) : kw === 'farthest-side' ? Math.max(dl, dr, dt, db)
+        : kw === 'closest-corner' ? Math.min(...cd) : Math.max(...cd);
+    } else {
+      const far = /^farthest/.test(kw);
+      rx = far ? Math.max(dl, dr) : Math.min(dl, dr);
+      ry = far ? Math.max(dt, db) : Math.min(dt, db);
+      if (/corner$/.test(kw)) { rx *= Math.SQRT2; ry *= Math.SQRT2; }
+    }
+    if (!(rx > 0.01) || !(ry > 0.01)) {
+      // Degenerate ellipse: CSS paints the last color.
+      const raw0 = parseStops(parts, 1);
+      if (!raw0) return null;
+      const c = raw0[raw0.length - 1].color;
+      return { type: 'GRADIENT_RADIAL', gradientTransform: [[1, 0, 0], [0, 1, 0]], gradientStops: [{ position: 0, color: c }, { position: 1, color: c }] };
+    }
+    let raw = parseStops(parts, rx);
+    if (!raw) return null;
+    // Figma pads past the ellipse with the last stop, CSS keeps going (or repeats):
+    // grow the ellipse to what the box can show and rescale the stops.
+    const cornerF = Math.max(...corners.map((c) => Math.hypot(c[0] / rx, c[1] / ry)));
+    const pmax = raw[raw.length - 1].pos;
+    const F = rep ? Math.max(1, cornerF) : Math.max(1, Math.min(pmax, cornerF));
+    if (F > 1.001) {
+      rx *= F; ry *= F;
+      raw = raw.map((s) => ({ color: s.color, src: s.src, pos: s.pos / F }));
+    }
+    const stops = finish(raw);
+    if (!stops) return null;
+    return {
+      type: 'GRADIENT_RADIAL',
+      gradientTransform: [[w / (2 * rx), 0, 0.5 - cx / (2 * rx)], [0, h / (2 * ry), 0.5 - cy / (2 * ry)]],
+      gradientStops: stops,
+    };
+  }
+
+  // conic: Figma's angular gradient starts along gradient-space +x; CSS at 12 o'clock, clockwise.
+  const fm = /from\s+(-?[\d.]+(?:deg|g?rad|turn))/.exec(sizePart);
+  const A = fm ? toRadians(fm[1]) : 0;
+  const raw = parseStops(parts.map((p) => p.replace(/(-?[\d.]+)(deg|grad|rad|turn)\b/g, (d) => `${toRadians(d) / (2 * Math.PI) * 100}%`)), 1);
+  const stops = raw && finish(raw);
   if (!stops) return null;
-  return { type: 'GRADIENT_ANGULAR', gradientTransform: [[1, 0, 0], [0, 1, 0]], gradientStops: stops };
+  const sc = 1 / Math.max(w, h), phi = Math.PI / 2 - A;
+  const co = Math.cos(phi), si = Math.sin(phi);
+  return {
+    type: 'GRADIENT_ANGULAR',
+    gradientTransform: [
+      [sc * co * w, -sc * si * h, 0.5 - sc * (co * cx - si * cy)],
+      [sc * si * w, sc * co * h, 0.5 - sc * (si * cx + co * cy)],
+    ],
+    gradientStops: stops,
+  };
 }
 
+// Whitespace split at parenthesis depth 0.
+function splitSpaces(str) {
+  const out = [];
+  let d = 0, cur = '';
+  for (const ch of (str || '').trim()) {
+    if (ch === '(') d++;
+    else if (ch === ')') d--;
+    if (/\s/.test(ch) && d === 0) {
+      if (cur) out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// A CSS length/percentage/calc against `ref` px (keywords too).
+const lenCache = new Map();
+function resolveLen(tok, ref) {
+  if (tok === 'left' || tok === 'top') return 0;
+  if (tok === 'center') return ref / 2;
+  if (tok === 'right' || tok === 'bottom') return ref;
+  if (/^-?[\d.]+%$/.test(tok)) return parseFloat(tok) / 100 * ref;
+  if (/^-?[\d.]+(px)?$/.test(tok)) return parseFloat(tok);
+  const key = tok + '@' + ref;
+  if (lenCache.has(key)) return lenCache.get(key);
+  let v = NaN;
+  try {
+    const d = S.doc;
+    const box = d.createElement('div');
+    box.style.cssText = `position:absolute;visibility:hidden;left:0;top:0;height:0;width:${ref}px`;
+    const c = d.createElement('div');
+    c.style.cssText = 'position:absolute';
+    c.style.left = tok;
+    box.appendChild(c);
+    d.documentElement.appendChild(box);
+    v = parseFloat(getComputedStyle(c).left);
+    box.remove();
+  } catch (e) {}
+  if (!Number.isFinite(v)) {
+    // calc(A% ± Bpx) without a DOM.
+    v = 0;
+    const re = /([+-]?)\s*(-?[\d.]+)(%|px)?/g;
+    let mm;
+    while ((mm = re.exec(tok))) v += (mm[1] === '-' ? -1 : 1) * (mm[3] === '%' ? parseFloat(mm[2]) / 100 * ref : parseFloat(mm[2]));
+  }
+  lenCache.set(key, v);
+  return v;
+}
+
+// Stops as {pos (fraction of len, unclamped), color, src}, positions fixed up like CSS.
 function parseStops(parts, len) {
   const raw = [];
   for (const part of parts) {
-    const p = part.trim();
-    if (/^-?[\d.]+(%|px)$/.test(p)) continue; // interpolation hint
-    const m = /^(.*?)((?:\s+-?[\d.]+(?:%|px))*)$/.exec(p);
-    const color = m && parseColor(m[1].trim());
-    if (!color) continue;
-    const ps = (m[2].match(/-?[\d.]+(?:%|px)/g) || []).map((v) => (v.endsWith('%') ? parseFloat(v) / 100 : parseFloat(v) / len));
-    if (!ps.length) raw.push({ color, pos: null });
-    else for (const pos of ps) raw.push({ color, pos });
+    const toks = splitSpaces(part);
+    if (!toks.length) continue;
+    const color = parseColor(toks[0]);
+    if (!color) continue; // interpolation hint (plain or calc)
+    const ps = toks.slice(1).map((t) => resolveLen(t, len) / len).filter(Number.isFinite);
+    if (!ps.length) raw.push({ color, pos: null, src: toks[0] });
+    else for (const pos of ps) raw.push({ color, pos, src: toks[0] });
   }
   if (!raw.length) return null;
-  if (raw.length === 1) raw.push({ color: raw[0].color, pos: 1 });
+  if (raw.length === 1) raw.push({ color: raw[0].color, pos: 1, src: raw[0].src });
   if (raw[0].pos == null) raw[0].pos = 0;
-  if (raw[raw.length - 1].pos == null) raw[raw.length - 1].pos = 1;
+  if (raw[raw.length - 1].pos == null) raw[raw.length - 1].pos = Math.max(1, ...raw.filter((s) => s.pos != null).map((s) => s.pos));
   let last = raw[0].pos;
   for (const s of raw) {
     if (s.pos == null) continue;
@@ -1394,7 +1538,164 @@ function parseStops(parts, len) {
     for (let k = i; k < j; k++) raw[k].pos = a + (b - a) * (k - i + 1) / (j - i + 1);
     i = j;
   }
-  return raw.map((s) => ({ position: clamp01(s.pos), color: { r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a } }));
+  return raw;
+}
+
+const lerpC = (a, b, t) => ({ r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t, a: a.a + (b.a - a.a) * t });
+
+// Cut the stop list to the painted [0, 1] range, interpolating at the edges.
+function clipStops(raw) {
+  const out = [];
+  const at = (t) => {
+    if (t <= raw[0].pos) return raw[0];
+    for (let i = 1; i < raw.length; i++) {
+      const a = raw[i - 1], b = raw[i];
+      if (t <= b.pos) return b.pos > a.pos ? { color: lerpC(a.color, b.color, (t - a.pos) / (b.pos - a.pos)), src: null } : b;
+    }
+    return raw[raw.length - 1];
+  };
+  const s0 = at(0);
+  out.push({ pos: 0, color: s0.color, src: s0.src });
+  for (const s of raw) if (s.pos > 0 && s.pos < 1) out.push(s);
+  const s1 = at(1);
+  out.push({ pos: 1, color: s1.color, src: s1.src });
+  // A hard stop exactly at an edge keeps the color on the painted side.
+  if (raw.some((s) => s.pos === 0)) { const z = raw.filter((s) => s.pos === 0).pop(); out[0] = { pos: 0, color: z.color, src: z.src }; }
+  if (raw.some((s) => s.pos === 1)) { const z = raw.find((s) => s.pos === 1); out[out.length - 1] = { pos: 1, color: z.color, src: z.src }; }
+  return out;
+}
+
+// repeating-*-gradient: tile one period over [0, 1].
+function repeatStops(raw) {
+  const f = raw[0].pos, P = raw[raw.length - 1].pos - f;
+  if (!(P > 1e-4)) {
+    const n = raw.length, avg = raw.reduce((c, s) => ({ r: c.r + s.color.r / n, g: c.g + s.color.g / n, b: c.b + s.color.b / n, a: c.a + s.color.a / n }), { r: 0, g: 0, b: 0, a: 0 });
+    return [{ pos: 0, color: avg }, { pos: 1, color: avg }];
+  }
+  const k0 = Math.floor(-f / P), k1 = Math.ceil((1 - f) / P);
+  if ((k1 - k0) * raw.length > 600) return clipStops(raw); // too fine for stops: one period
+  const out = [];
+  for (let k = k0; k < k1; k++) for (const s of raw) out.push({ pos: s.pos + k * P, color: s.color, src: s.src });
+  return clipStops(out);
+}
+
+// sRGB <-> OKLab (Ottosson).
+function toLin(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+function fromLin(c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; }
+function rgbToOklab(c) {
+  const r = toLin(c.r), g = toLin(c.g), b = toLin(c.b);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+function oklabToRgb(L, A, B) {
+  const l = Math.pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
+  const m = Math.pow(L - 0.1055613458 * A - 0.0638541728 * B, 3);
+  const s = Math.pow(L - 0.0894841775 * A - 1.2914855480 * B, 3);
+  const f = (v) => clamp01(fromLin(v));
+  return { r: f(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), g: f(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), b: f(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s) };
+}
+// A stop's color in an interpolation space, from its source text when it is literal.
+function spaceCoords(stop, space) {
+  const src = stop.src || '';
+  const lit = /^(oklch|oklab)\(\s*([\d.]+%?|none)\s+(-?[\d.]+%?|none)\s+(-?[\d.]+(?:deg)?|none)/i.exec(src);
+  const num = (v, pct) => (v === 'none' ? 0 : /%$/.test(v) ? parseFloat(v) / 100 * pct : parseFloat(v));
+  let lab;
+  if (lit && lit[1].toLowerCase() === 'oklab') lab = [num(lit[2], 1), num(lit[3], 0.4), num(lit[4], 0.4)];
+  else if (lit) {
+    const L = num(lit[2], 1), C = num(lit[3], 0.4), Hh = num(lit[4], 0);
+    if (space === 'oklch') return [L, C, Hh, lit[3] === 'none' || C < 1e-4];
+    lab = [L, C * Math.cos(Hh * Math.PI / 180), C * Math.sin(Hh * Math.PI / 180)];
+  } else if (space === 'srgb-linear') return [toLin(stop.color.r), toLin(stop.color.g), toLin(stop.color.b)];
+  else if (space === 'hsl') {
+    const { r, g, b } = stop.color, mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+    let hh = 0;
+    if (d > 1e-6) hh = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    const sat = d < 1e-6 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    return [sat, l, (hh * 60 + 360) % 360, d < 1e-6];
+  }
+  else lab = rgbToOklab(stop.color);
+  if (space === 'oklch') {
+    const C = Math.hypot(lab[1], lab[2]);
+    return [lab[0], C, (Math.atan2(lab[2], lab[1]) * 180 / Math.PI + 360) % 360, C < 1e-4];
+  }
+  return lab;
+}
+function coordsToRgb(v, space) {
+  if (space === 'hsl') {
+    // v = [s, l, h] (hue last, like oklch)
+    const sat = v[0], l = v[1], hh = ((v[2] % 360) + 360) % 360;
+    const f = (n) => { const k = (n + hh / 30) % 12; return clamp01(l - sat * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1))); };
+    return { r: f(0), g: f(8), b: f(4) };
+  }
+  if (space === 'srgb-linear') return { r: clamp01(fromLin(v[0])), g: clamp01(fromLin(v[1])), b: clamp01(fromLin(v[2])) };
+  if (space === 'oklch') return oklabToRgb(v[0], v[1] * Math.cos(v[2] * Math.PI / 180), v[1] * Math.sin(v[2] * Math.PI / 180));
+  return oklabToRgb(v[0], v[1], v[2]);
+}
+
+// Figma interpolates straight (non-premultiplied) sRGB. Bake CSS premultiplied alpha
+// and other interpolation spaces in with extra stops.
+function interpStops(st, space, hueMode) {
+  if (space === 'hwb') space = 'hsl';
+  if (space === 'lch') space = 'oklch';
+  const srgb = /^srgb$|^srgb-legacy$/.test(space);
+  if (!/^(oklab|oklch|srgb-linear|hsl)$/.test(space) && !srgb) space = 'oklab'; // lab/xyz/display-p3: close to oklab
+  const polar = space === 'oklch' || space === 'hsl';
+  const out = [];
+  const push = (pos, c) => {
+    const p = out[out.length - 1];
+    const col = { r: clamp01(c.r), g: clamp01(c.g), b: clamp01(c.b), a: clamp01(c.a) };
+    pos = Math.max(p ? p.position : 0, clamp01(Math.round(pos * 1e6) / 1e6));
+    if (p && p.position === pos && ['r', 'g', 'b', 'a'].every((k) => Math.abs(p.color[k] - col[k]) < 1e-4)) return;
+    out.push({ position: pos, color: col });
+  };
+  for (let i = 0; i < st.length - 1; i++) {
+    const S0 = st[i], S1 = st[i + 1];
+    let A = S0.color, B = S1.color;
+    const p0 = S0.pos, p1 = S1.pos;
+    // Premultiplied: a fully transparent end takes the other end's color.
+    if (A.a === 0 && B.a > 0) A = { r: B.r, g: B.g, b: B.b, a: 0 };
+    if (B.a === 0 && A.a > 0) B = { r: A.r, g: A.g, b: A.b, a: 0 };
+    push(p0, A);
+    const rgbDiff = Math.max(Math.abs(A.r - B.r), Math.abs(A.g - B.g), Math.abs(A.b - B.b));
+    const premulBend = A.a > 0 && B.a > 0 && Math.abs(A.a - B.a) > 0.05 && rgbDiff > 0.04;
+    const spaceBend = !srgb && (rgbDiff > 0.02 || (polar && hueMode !== 'shorter')) && A.a > 0 && B.a > 0;
+    if (p1 > p0 && (premulBend || spaceBend)) {
+      const N = spaceBend ? (polar ? 16 : 8) : 6;
+      let ca, cb;
+      if (spaceBend) {
+        ca = spaceCoords(S0, space);
+        cb = spaceCoords(S1, space);
+        if (polar) {
+          // Powerless hue takes the other end's; then the hue arc by mode.
+          if (ca[3] && !cb[3]) ca[2] = cb[2];
+          if (cb[3] && !ca[3]) cb[2] = ca[2];
+          let d = cb[2] - ca[2];
+          if (hueMode === 'shorter') { if (d > 180) d -= 360; else if (d < -180) d += 360; }
+          else if (hueMode === 'longer') { if (d > 0 && d < 180) d -= 360; else if (d > -180 && d <= 0) d += 360; }
+          else if (hueMode === 'increasing') { if (d < 0) d += 360; }
+          else if (hueMode === 'decreasing') { if (d > 0) d -= 360; }
+          cb = [cb[0], cb[1], ca[2] + d];
+        }
+      }
+      for (let k = 1; k < N; k++) {
+        const t = k / N, a = A.a + (B.a - A.a) * t;
+        let c;
+        if (spaceBend) {
+          const v = [0, 1, 2].map((j) => (ca[j] * A.a * (1 - t) + cb[j] * B.a * t) / (a || 1));
+          c = coordsToRgb(v, space);
+        } else {
+          const ch = (x, y) => (x * A.a * (1 - t) + y * B.a * t) / (a || 1);
+          c = { r: ch(A.r, B.r), g: ch(A.g, B.g), b: ch(A.b, B.b) };
+        }
+        push(p0 + (p1 - p0) * t, { r: c.r, g: c.g, b: c.b, a });
+      }
+    }
+    push(p1, B);
+  }
+  if (out.length === 1) out.push({ position: 1, color: Object.assign({}, out[0].color) });
+  return out;
 }
 
 // ---------- text ----------
@@ -2655,17 +2956,31 @@ function tryAutoLayout(frame, cs) {
   if (!kids.length) return;
   const flex = /flex/.test(cs.display);
   const dirs = flex ? [/column/.test(cs.flexDirection) ? 'VERTICAL' : 'HORIZONTAL'] : ['VERTICAL', 'HORIZONTAL'];
+  const sb = flex && /space-between/.test(cs.justifyContent);
   for (const dir of dirs) {
-    const layout = fitLayout(frame, kids, dir, flex && /space-between/.test(cs.justifyContent));
+    const H = dir === 'HORIZONTAL';
+    const baseline = flex && H && /^(first )?baseline$/.test(cs.alignItems);
+    // row-reverse / column-reverse / `order`: Figma lays out in layer order, so try the visual order.
+    const byPos = kids.slice().sort((p, q) => (H ? p.x - q.x : p.y - q.y));
+    let ordered = flex && /reverse/.test(cs.flexDirection) ? byPos : kids;
+    let layout = fitLayout(frame, ordered, dir, sb, baseline);
+    if (!layout && flex && cs.flexWrap === 'nowrap' && ordered !== byPos && byPos.some((k, i) => k !== kids[i])) {
+      ordered = byPos;
+      layout = fitLayout(frame, ordered, dir, sb, baseline);
+    }
     if (layout) {
+      if (ordered !== kids) {
+        let i = 0;
+        frame.children = frame.children.map((c) => (c.absolute ? c : ordered[i++]));
+      }
       frame.layout = layout;
-      markStretch(frame, kids, layout);
+      markStretch(frame, ordered, layout);
       return;
     }
   }
 }
 
-function fitLayout(frame, kids, dir, spaceBetween) {
+function fitLayout(frame, kids, dir, spaceBetween, baseline) {
   const T = 1.5;
   const H = dir === 'HORIZONTAL';
   const pos = (k) => (H ? k.x : k.y);
@@ -2681,9 +2996,13 @@ function fitLayout(frame, kids, dir, spaceBetween) {
   // Main axis: children in DOM order, no overlaps, equal gaps.
   const gaps = [];
   for (let i = 1; i < kids.length; i++) gaps.push(pos(kids[i]) - pos(kids[i - 1]) - len(kids[i - 1]));
-  if (gaps.some((g) => g < -T)) return null;
   const gap = gaps.length ? sum(gaps) / gaps.length : 0;
   if (gaps.some((g) => Math.abs(g - gap) > T)) return null;
+  // Equal overlaps (avatar stacks, -space-x-*) are a negative itemSpacing.
+  if (gap < -T) {
+    if (spaceBetween) return null;
+    for (let i = 1; i < kids.length; i++) if (pos(kids[i]) <= pos(kids[i - 1])) return null;
+  }
   const last = kids[kids.length - 1];
   const start = pos(kids[0]);
   const end = main - pos(last) - len(last);
@@ -2704,15 +3023,22 @@ function fitLayout(frame, kids, dir, spaceBetween) {
     b = floor0(after);
   } else {
     const diff = kids.map((k, i) => before[i] - after[i]);
-    if (!same(diff)) return null;
-    counter = 'CENTER';
-    const m = sum(diff) / diff.length;
-    a = Math.max(0, m);
-    b = Math.max(0, -m);
+    if (same(diff)) {
+      counter = 'CENTER';
+      const m = sum(diff) / diff.length;
+      a = Math.max(0, m);
+      b = Math.max(0, -m);
+    } else {
+      // Figma derives baselines from text: only trust it for text or nested Auto Layout kids.
+      if (!baseline || !kids.every((k) => k.type === 'TEXT' || (k.type === 'FRAME' && k.layout))) return null;
+      counter = 'BASELINE';
+      a = floor0(before);
+      b = floor0(after);
+    }
   }
 
   let primary = 'MIN';
-  let spacing = r2(Math.max(0, gap));
+  let spacing = r2(gap < -T ? gap : Math.max(0, gap));
   if (spaceBetween && kids.length > 1) {
     primary = 'SPACE_BETWEEN';
     spacing = 0;

@@ -41,6 +41,20 @@ function paintLayer(p, images) {
     } else d.style.background = '#dbdbe0';
     return d;
   }
+  if (p.type === 'GRADIENT_ANGULAR') {
+    // Gradient space centre (0.5, 0.5), start along +x, clockwise (y down).
+    const inv = invert(p.gradientTransform);
+    const ap = (x, y) => [inv[0][0] * x + inv[0][1] * y + inv[0][2], inv[1][0] * x + inv[1][1] * y + inv[1][2]];
+    const c = ap(0.5, 0.5), e = ap(1, 0.5);
+    const d = document.createElement('div');
+    d.className = 'layer';
+    d.dataset.conic = '1';
+    d.style.setProperty('--cx', c[0] * 100 + '%');
+    d.style.setProperty('--cy', c[1] * 100 + '%');
+    d.dataset.dir = JSON.stringify([e[0] - c[0], e[1] - c[1]]);
+    d.dataset.stops = p.gradientStops.map((s) => `${rgba(s.color)} ${s.position * 360}deg`).join(', ');
+    return d;
+  }
   if (/^GRADIENT_/.test(p.type)) {
     const id = 'g' + (++gid);
     const inv = invert(p.gradientTransform);
@@ -96,6 +110,8 @@ function build(n, parent, images) {
     el.style.position = 'relative';
     el.style.flex = 'none';
     if (n.stretch) el.style.alignSelf = 'stretch';
+    // Figma allows a negative itemSpacing, CSS gap does not.
+    if (parent.layout.spacing < 0 && parent.flowCount++ > 0) el.style[parent.layout.mode === 'HORIZONTAL' ? 'marginLeft' : 'marginTop'] = parent.layout.spacing + 'px';
   } else {
     el.style.left = n.x + 'px';
     el.style.top = n.y + 'px';
@@ -199,7 +215,7 @@ function build(n, parent, images) {
     el.style.display = 'flex';
     el.style.flexDirection = l.mode === 'HORIZONTAL' ? 'row' : 'column';
     el.style.padding = `${l.pt}px ${l.pr}px ${l.pb}px ${l.pl}px`;
-    el.style.gap = l.spacing + 'px';
+    el.style.gap = Math.max(0, l.spacing) + 'px';
     el.style.justifyContent = { MIN: 'flex-start', MAX: 'flex-end', CENTER: 'center', SPACE_BETWEEN: 'space-between' }[l.primaryAlign];
     el.style.alignItems = { MIN: 'flex-start', MAX: 'flex-end', CENTER: 'center', BASELINE: 'baseline' }[l.counterAlign];
     if (l.primarySizing === 'AUTO') {
@@ -212,7 +228,7 @@ function build(n, parent, images) {
     else el.style.height = 'auto';
   }
   parent ? parent.el.appendChild(el) : document.body.appendChild(el);
-  const self = { el, layout: l };
+  const self = { el, layout: l, flowCount: 0 };
   for (const c of n.children || []) build(c, self, images);
 }
 
@@ -271,6 +287,12 @@ window.renderTree = async (json) => {
     return new Promise((r) => { const i = new Image(); i.onload = i.onerror = r; i.src = m[1]; });
   }));
   await Promise.all([...document.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
+  for (const d of document.querySelectorAll('[data-conic]')) {
+    const dir = JSON.parse(d.dataset.dir);
+    const w = d.offsetWidth || 1, h = d.offsetHeight || 1;
+    const ang = Math.atan2(dir[0] * w, -dir[1] * h) * 180 / Math.PI;
+    d.style.background = `conic-gradient(from ${ang}deg at var(--cx) var(--cy), ${d.dataset.stops})`;
+  }
   const root = document.body.firstElementChild;
   return { w: root.offsetWidth, h: root.offsetHeight };
 };
