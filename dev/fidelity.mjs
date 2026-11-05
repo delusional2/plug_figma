@@ -183,8 +183,9 @@ async function rerender(doc, tabs) {
   const size = await p.eval(`renderTree(${JSON.stringify(JSON.stringify(doc))})`);
   await sleep(200);
   const png = await p.shot(size.w, size.h);
+  const missingFonts = await p.eval('window.__missingFonts.join(",")');
   await p.close();
-  return { png, ...size };
+  return { png, missingFonts, ...size };
 }
 
 async function diff(a, b, w, h, tabs) {
@@ -231,7 +232,7 @@ async function runCase(c) {
   fs.writeFileSync(path.join(OUT, name + '.diff.png'), Buffer.from(d.png, 'base64'));
   const count = (n) => 1 + (n.children || []).reduce((a, k) => a + count(k), 0);
   const al = (n) => (n.layout ? 1 : 0) + (n.children || []).reduce((a, k) => a + al(k), 0);
-  return { case: name, diffPct: +d.pct.toFixed(2), heightDelta: d.heightDelta, layers: count(doc.root), autoLayouts: al(doc.root), images: doc.images.length, imagesMissing: doc.images.filter((i) => !i.bytes).length, slowImages: doc.images.filter((i) => i.slow).length || undefined, warnings: (doc.warnings || []).join(',') || undefined, mockErrors: mockErrors ? String(mockErrors).slice(0, 400) : 0 };
+  return { case: name, diffPct: +d.pct.toFixed(2), heightDelta: d.heightDelta, layers: count(doc.root), autoLayouts: al(doc.root), images: doc.images.length, imagesMissing: doc.images.filter((i) => !i.bytes).length, slowImages: doc.images.filter((i) => i.slow).length || undefined, missingFonts: rr.missingFonts || undefined, warnings: (doc.warnings || []).join(',') || undefined, mockErrors: mockErrors ? String(mockErrors).slice(0, 400) : 0 };
 }
 
 const results = [];
@@ -275,11 +276,11 @@ try {
     }
   };
   await Promise.all(Array.from({ length: Math.min(jobs, cases.length) }, worker));
-  // Image hosts (picsum/unsplash) stall under parallel load and the stage then marks images
-  // "slow": rerun those cases (and timeouts) one at a time so the numbers don't depend on --jobs.
+  // Image hosts (picsum/unsplash) and Google Fonts stall under parallel load (images marked
+  // "slow", fonts missing in the re-render): rerun those cases (and timeouts) one at a time so the numbers don't depend on --jobs.
   if (jobs > 1) {
     for (let i = 0; i < results.length; i++) {
-      if (!results[i].slowImages && !results[i].error) continue;
+      if (!results[i].slowImages && !results[i].missingFonts && !results[i].error) continue;
       const c = cases.find((f) => results[i].case === f.replace(/\.html$/, '') + (width !== 1440 ? `@${width}` : ''));
       const r = await runOne(c);
       process.stderr.write(`[rerun] ${r.case} ${r.error ? 'ERROR ' + r.error.slice(0, 80) : r.diffPct + '%'}\n`);
