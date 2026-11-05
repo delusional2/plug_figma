@@ -952,7 +952,7 @@ function walkEl(el, ox, oy) {
 
   switch (tag) {
     case 'IMG': return leaf(imageNode(el, cs, box));
-    case 'SVG': return leaf(svgNode(el, box));
+    case 'SVG': return svgLayers(el, cs, rect, box, common);
     case 'CANVAS': return leaf(canvasNode(el, cs, box));
     case 'VIDEO': return leaf(videoNode(el, cs, box));
     case 'IFRAME': case 'OBJECT': case 'EMBED': case 'AUDIO':
@@ -1150,9 +1150,11 @@ function backgroundFills(cs, box) {
         if (S.opts.images) {
           const size = at(sizes, i) || 'auto';
           let bg = null;
-          // cover/contain map to Figma's FILL/FIT; anything else (icons placed with
-          // a length size and a position, tiles) is composed at the box size.
-          if (!/cover|contain/.test(size) && size !== '100% 100%' && box.w > 0 && box.h > 0) {
+          // Centered cover/contain map to Figma's FILL/FIT; anything else (icons placed
+          // with a length size and a position, tiles, bg-bottom) is composed at the box size.
+          const centered = at(posX, i) === '50%' && at(posY, i) === '50%';
+          const native = centered && (size === 'cover' || (size === 'contain' && at(reps, i) === 'no-repeat'));
+          if (!native && box.w > 0 && box.h > 0) {
             const n = (p) => parseFloat(cs[p]) || 0;
             bg = { w: r2(box.w), h: r2(box.h), size, px: at(posX, i) || '0%', py: at(posY, i) || '0%', repeat: at(reps, i) || 'repeat',
               ox: n('borderLeftWidth'), oy: n('borderTopWidth'), aw: r2(box.w - n('borderLeftWidth') - n('borderRightWidth')), ah: r2(box.h - n('borderTopWidth') - n('borderBottomWidth')) };
@@ -2243,38 +2245,315 @@ function pickerHidden(el) {
   return false;
 }
 
+// <svg> with its own box paint (background, border, padding, ring, shadow):
+// a frame with that paint, the glyph in the content box. CSS drop-shadow()
+// follows the glyph.
+function svgLayers(el, cs, rect, box, common) {
+  if (!(box.w > 0 && box.h > 0)) return [];
+  const v = boxVisual(el, cs, box);
+  const ds = dropShadows(cs.filter);
+  const cb = contentBox(el, cs);
+  const inner = { x: r2(cb.x - rect.left), y: r2(cb.y - rect.top), w: r2(cb.w), h: r2(cb.h) };
+  const glyph = inner.w > 0 && inner.h > 0 ? svgNode(el, inner, cs) : null;
+  if (!v.has && !ds.length) {
+    if (!glyph) return [];
+    glyph.x = r2(glyph.x + box.x);
+    glyph.y = r2(glyph.y + box.y);
+    return [Object.assign(glyph, common)];
+  }
+  v.effects = v.effects.concat(ds);
+  if (!v.fills.length && !v.stroke) v.clip = false;
+  const f = frameNode(el, box, v, common, glyph ? [glyph] : []);
+  if (glyph) f.name = glyph.name;
+  return [f];
+}
+
+function dropShadows(filter) {
+  const out = [];
+  const re = /drop-shadow\(\s*((?:[^()]|\([^)]*\))*)\)/g;
+  let m;
+  while ((m = re.exec(filter || ''))) {
+    const colM = /(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^)]*\)|#[0-9a-f]{3,8}\b/i.exec(m[1]);
+    const c = parseColor(colM ? colM[0] : 'rgb(0, 0, 0)');
+    const nums = (m[1].replace(colM ? colM[0] : '', ' ').match(/-?[\d.]+(?=px|\s|$)/g) || []).map(parseFloat);
+    if (!c || c.a === 0) continue;
+    out.push({ type: 'DROP_SHADOW', color: { r: c.r, g: c.g, b: c.b, a: c.a }, offset: { x: nums[0] || 0, y: nums[1] || 0 },
+      radius: Math.max(0, nums[2] || 0), spread: 0, visible: true, blendMode: 'NORMAL', showShadowBehindNode: false });
+  }
+  return out;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
+const PAINT_OPACITY = { fill: 'fill-opacity', stroke: 'stroke-opacity', 'stop-color': 'stop-opacity' };
+const SVG_SHAPES = /^(path|rect|circle|ellipse|line|polyline|polygon|text|tspan|textpath|use|image)$/;
+const SVG_HIDDEN_CTX = 'defs,clipPath,mask,pattern,symbol,marker';
+
+// Figma's SVG importer knows hex/rgb only: oklch()/color() (Tailwind v4) → hex
+// with the alpha moved into the matching *-opacity.
+function svgPaint(val) {
+  val = (val || '').trim();
+  if (!val || val === 'none') return { v: val, a: 1 };
+  const um = /^(url\([^)]*\))/.exec(val);
+  if (um) return { v: um[1], a: 1 };
+  if (val === 'transparent') return { v: '#000000', a: 0 };
+  const c = parseColor(val);
+  if (!c) return { v: val, a: 1 };
+  return { v: toCss(c), a: c.a };
+}
+
+// The viewBox → viewport mapping of an <svg>/<symbol> of size w×h.
+function viewBoxMatrix(vb, par, w, h) {
+  if (!vb || !(vb[2] > 0) || !(vb[3] > 0)) return new DOMMatrix();
+  par = (par || 'xMidYMid meet').trim();
+  if (/^none/.test(par)) return new DOMMatrix().scale(w / vb[2], h / vb[3]).translate(-vb[0], -vb[1]);
+  const k = /slice/.test(par) ? Math.max(w / vb[2], h / vb[3]) : Math.min(w / vb[2], h / vb[3]);
+  const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+  const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+  return new DOMMatrix().translate((w - vb[2] * k) * ax, (h - vb[3] * k) * ay).scale(k).translate(-vb[0], -vb[1]);
+}
+
+const mstr = (M) => `matrix(${[M.a, M.b, M.c, M.d, M.e, M.f].map((x) => r2(x * 1000) / 1000).join(' ')})`;
+
+// A dash offset folded into the dash pattern (the importer ignores stroke-dashoffset).
+function shiftDashes(P, o) {
+  if (P.length % 2) P = P.concat(P);
+  const L = P.reduce((a, b) => a + b, 0);
+  if (!(L > 0)) return P;
+  o = ((o % L) + L) % L;
+  if (!o) return P;
+  let k = 0, start = 0;
+  while (k < P.length - 1 && start + P[k] <= o) { start += P[k]; k++; }
+  const r = P[k] - (o - start);
+  let Q = [r].concat(P.slice(k + 1), P.slice(0, k), [P[k] - r]);
+  if (k % 2 === 0) Q.push(0); else Q = [0].concat(Q);
+  return Q;
+}
+
 // Inline SVG is copied with its computed paint baked into attributes,
 // so currentColor and CSS-driven fills survive outside the page.
-function svgNode(el, box) {
+function svgNode(el, box, rootCs) {
   const clone = el.cloneNode(true);
   const src = [el, ...el.querySelectorAll('*')];
   const dst = [clone, ...clone.querySelectorAll('*')];
+  const srcOf = new Map();
   src.forEach((s, i) => {
     const d = dst[i];
     if (!d) return;
-    const scs = S.win.getComputedStyle(s);
-    const props = s.tagName.toLowerCase() === 'stop' ? STOP_PROPS : SHAPE_PROPS;
-    for (const p of props) {
-      if (i === 0 && p === 'opacity') continue; // applied to the layer itself
-      let val = scs.getPropertyValue(p);
-      if (!val) continue;
-      val = val.replace(/url\(\s*["']?[^"')]*?(#[^"')]+)["']?\s*\)/g, 'url($1)').replace(/(\d)px\b/g, '$1');
-      d.setAttribute(p, val);
-    }
-    if (i > 0 && scs.display === 'none') d.setAttribute('display', 'none');
-    d.removeAttribute('class');
-    d.removeAttribute('style');
+    srcOf.set(d, s);
+    try { bakeSvgElement(s, d, i === 0); } catch (e) { /* keep the copied attributes */ }
   });
+  const num = (a) => (/^[\d.]+(px)?$/.test(el.getAttribute(a) || '') ? parseFloat(el.getAttribute(a)) : 0);
   if (!el.getAttribute('viewBox')) {
-    const num = (a) => (/^[\d.]+(px)?$/.test(el.getAttribute(a) || '') ? parseFloat(el.getAttribute(a)) : 0);
     const w0 = num('width') || box.w;
     const h0 = num('height') || box.h;
     clone.setAttribute('viewBox', `0 0 ${w0} ${h0}`);
+  }
+  try { inlineUses(clone, srcOf, el); } catch (e) { console.warn('html-to-figma: <use> not inlined', e); }
+  try { inlineDefs(clone); } catch (e) { console.warn('html-to-figma: svg defs not inlined', e); }
+  // A CSS transform on the <svg> itself (a -rotate-90 progress ring): baked
+  // into the content, the node keeps the measured bounding box.
+  const cs = rootCs || getComputedStyle(el);
+  if (cs.transform && cs.transform !== 'none' && rootCs) {
+    try {
+      const w0 = parseFloat(cs.width) || box.w, h0 = parseFloat(cs.height) || box.h;
+      const o = (cs.transformOrigin || '').split(/\s+/).map(parseFloat);
+      const F = new DOMMatrix().translate(o[0] || 0, o[1] || 0).multiply(new DOMMatrix(cs.transform)).translate(-(o[0] || 0), -(o[1] || 0));
+      const pts = [[0, 0], [w0, 0], [0, h0], [w0, h0]].map(([x, y]) => F.transformPoint(new DOMPoint(x, y)));
+      const minX = Math.min(...pts.map((p) => p.x)), minY = Math.min(...pts.map((p) => p.y));
+      const vb = clone.getAttribute('viewBox').split(/[\s,]+/).map(parseFloat);
+      const G = new DOMMatrix().translate(-minX, -minY).multiply(F).multiply(viewBoxMatrix(vb, el.getAttribute('preserveAspectRatio'), w0, h0));
+      const g = S.doc.createElementNS(SVG_NS, 'g');
+      g.setAttribute('transform', mstr(G));
+      while (clone.firstChild) g.appendChild(clone.firstChild);
+      clone.appendChild(g);
+      clone.setAttribute('viewBox', `0 0 ${box.w} ${box.h}`);
+      clone.removeAttribute('preserveAspectRatio');
+    } catch (e) { /* keep it untransformed */ }
   }
   clone.setAttribute('width', box.w);
   clone.setAttribute('height', box.h);
   const label = el.getAttribute('aria-label') || (el.querySelector('title') || {}).textContent;
   return { type: 'SVG', name: label ? `svg · ${label}`.slice(0, 60) : 'svg', ...box, svg: new XMLSerializer().serializeToString(clone) };
+}
+
+function bakeSvgElement(s, d, isRoot) {
+  const tag = s.tagName.toLowerCase();
+  const scs = S.win.getComputedStyle(s);
+  const props = tag === 'stop' ? STOP_PROPS : SHAPE_PROPS;
+  const vals = {};
+  for (const p of props) {
+    if (isRoot && p === 'opacity') continue; // applied to the layer itself
+    let val = scs.getPropertyValue(p);
+    if (!val) continue;
+    val = val.replace(/url\(\s*["']?[^"')]*?(#[^"')]+)["']?\s*\)/g, 'url($1)').replace(/(\d)px\b/g, '$1');
+    vals[p] = val;
+  }
+  for (const p in PAINT_OPACITY) {
+    if (vals[p] == null) continue;
+    const pv = svgPaint(vals[p]);
+    vals[p] = pv.v;
+    if (pv.a < 1) {
+      const op = PAINT_OPACITY[p];
+      vals[op] = String(r2((vals[op] != null ? parseFloat(vals[op]) : 1) * pv.a * 1000) / 1000);
+    }
+  }
+  delete vals['stroke-dashoffset'];
+  for (const p in vals) d.setAttribute(p, vals[p]);
+  // Text: fonts usually come from the HTML around the svg.
+  if (/^(text|tspan|textpath)$/.test(tag)) {
+    d.setAttribute('font-family', scs.fontFamily);
+    d.setAttribute('font-size', parseFloat(scs.fontSize) || 16);
+    d.setAttribute('font-weight', scs.fontWeight);
+    if (scs.fontStyle !== 'normal') d.setAttribute('font-style', scs.fontStyle);
+    if (scs.letterSpacing && scs.letterSpacing !== 'normal') d.setAttribute('letter-spacing', parseFloat(scs.letterSpacing) || 0);
+    if (scs.textDecorationLine && scs.textDecorationLine !== 'none') d.setAttribute('text-decoration', scs.textDecorationLine);
+    d.setAttribute('text-anchor', scs.textAnchor || 'start');
+    if (scs.dominantBaseline && !/auto|alphabetic/.test(scs.dominantBaseline)) d.setAttribute('dominant-baseline', scs.dominantBaseline);
+    // Anchor and baseline normalised to the measured start of the first glyph.
+    if (tag === 'text' && (scs.textAnchor !== 'start' || d.hasAttribute('dominant-baseline'))
+      && !/\s/.test((s.getAttribute('x') || '').trim()) && !s.querySelector('tspan[x],tspan[y],tspan[dx],tspan[dy],textPath')
+      && s.getNumberOfChars() > 0) {
+      const p = s.getStartPositionOfChar(0);
+      d.setAttribute('x', r2(p.x));
+      d.setAttribute('y', r2(p.y));
+      d.removeAttribute('dx');
+      d.removeAttribute('dy');
+      d.setAttribute('text-anchor', 'start');
+      d.removeAttribute('dominant-baseline');
+    }
+  }
+  if (!isRoot) {
+    if (scs.display === 'none') d.setAttribute('display', 'none');
+    else if (scs.visibility !== 'visible' && SVG_SHAPES.test(tag)) d.setAttribute('display', 'none');
+    // CSS transforms (and transform-origin/box): the rendered local matrix.
+    if (scs.transform && scs.transform !== 'none' && s instanceof SVGGraphicsElement && !s.closest(SVG_HIDDEN_CTX)) {
+      const a = s.getCTM(), b = s.parentNode && s.parentNode.getCTM ? s.parentNode.getCTM() : null;
+      if (a && b) d.setAttribute('transform', mstr(b.inverse().multiply(a)));
+    }
+    // Dashes: offset folded into the pattern; circles become paths that start at 3 o'clock.
+    const da = scs.strokeDasharray;
+    if (da && da !== 'none' && SVG_SHAPES.test(tag)) {
+      let P = da.split(/[\s,]+/).map(parseFloat).filter((n) => !isNaN(n) && n >= 0);
+      let o = parseFloat(scs.strokeDashoffset) || 0;
+      const pl = parseFloat(s.getAttribute('pathLength'));
+      if (pl > 0 && s.getTotalLength) {
+        const k = s.getTotalLength() / pl;
+        P = P.map((x) => x * k);
+        o *= k;
+        d.removeAttribute('pathLength');
+      }
+      if (P.length && P.some((x) => x > 0)) {
+        d.setAttribute('stroke-dasharray', shiftDashes(P, o).map((x) => r2(x)).join(' '));
+        d.removeAttribute('stroke-dashoffset');
+        if (tag === 'circle' || tag === 'ellipse') {
+          const cx = s.cx.baseVal.value, cy = s.cy.baseVal.value;
+          const rx = tag === 'circle' ? s.r.baseVal.value : s.rx.baseVal.value, ry = tag === 'circle' ? rx : s.ry.baseVal.value;
+          const path = S.doc.createElementNS(SVG_NS, 'path');
+          for (const at of [...d.attributes]) if (!/^(cx|cy|r|rx|ry)$/.test(at.name)) path.setAttribute(at.name, at.value);
+          path.setAttribute('d', `M${cx + rx} ${cy}A${rx} ${ry} 0 1 1 ${cx - rx} ${cy}A${rx} ${ry} 0 1 1 ${cx + rx} ${cy}`);
+          d.__h2fReplace = path;
+        }
+      }
+    }
+  }
+  d.removeAttribute('class');
+  d.removeAttribute('style');
+  if (d.__h2fReplace) { const r = d.__h2fReplace; delete d.__h2fReplace; while (d.firstChild) r.appendChild(d.firstChild); d.replaceWith(r); }
+}
+
+// <use href="#id"> → the referenced content, placed like the browser does
+// (sprites usually live in another <svg> of the page).
+function inlineUses(clone, srcOf, el) {
+  const rootVb = (clone.getAttribute('viewBox') || '').split(/[\s,]+/).map(parseFloat);
+  const color0 = getComputedStyle(el).color;
+  for (let pass = 0; pass < 8; pass++) {
+    const uses = [...clone.querySelectorAll('use')];
+    if (!uses.length) return;
+    for (const u of uses) {
+      const ref = u.getAttribute('href') || u.getAttributeNS(XLINK_NS, 'href') || '';
+      const t = ref[0] === '#' ? S.doc.getElementById(ref.slice(1)) : null;
+      if (!t || t.namespaceURI !== SVG_NS || t.contains(u)) { u.remove(); continue; }
+      const su = srcOf.get(u);
+      const color = su ? getComputedStyle(su).color : color0;
+      const g = S.doc.createElementNS(SVG_NS, 'g');
+      for (const a of [...u.attributes]) if (!/^(href|xlink:href|x|y|width|height|id)$/.test(a.name)) g.setAttribute(a.name, a.value);
+      const x = parseFloat(u.getAttribute('x')) || 0, y = parseFloat(u.getAttribute('y')) || 0;
+      let M = new DOMMatrix().translate(x, y);
+      const tt = t.tagName.toLowerCase();
+      const inner = S.doc.createElementNS(SVG_NS, 'g');
+      if (tt === 'symbol' || tt === 'svg') {
+        const vb = (t.getAttribute('viewBox') || '').split(/[\s,]+/).map(parseFloat);
+        const len = (v, ref0) => (v && !/%$/.test(v) ? parseFloat(v) : (/%$/.test(v || '') ? parseFloat(v) / 100 : 1) * ref0);
+        const w = len(u.getAttribute('width'), rootVb[2] || 0), h = len(u.getAttribute('height'), rootVb[3] || 0);
+        if (vb.length === 4 && w > 0 && h > 0) M = M.multiply(viewBoxMatrix(vb, t.getAttribute('preserveAspectRatio'), w, h));
+        for (const a of [...t.attributes]) if (/^(fill|stroke|stroke-.*|fill-.*|opacity|clip-path|mask|style|color|font-.*)$/.test(a.name)) inner.setAttribute(a.name, a.value);
+        for (const c of t.childNodes) inner.appendChild(c.cloneNode(true));
+      } else {
+        inner.appendChild(t.cloneNode(true));
+      }
+      const own = g.getAttribute('transform');
+      g.setAttribute('transform', (own ? own + ' ' : '') + mstr(M));
+      for (const n of [inner, ...inner.querySelectorAll('*')]) {
+        n.removeAttribute('id');
+        for (const a of [...n.attributes]) if (/currentColor/i.test(a.value)) n.setAttribute(a.name, a.value.replace(/currentColor/gi, color));
+      }
+      g.appendChild(inner);
+      u.replaceWith(g);
+    }
+  }
+  for (const u of clone.querySelectorAll('use')) u.remove();
+}
+
+// url(#id) / href="#id" defined in another <svg> of the page: copied into <defs>.
+function inlineDefs(clone) {
+  const has = (id) => !!clone.querySelector(`[id="${CSS.escape(id)}"]`);
+  const refs = (n) => {
+    const out = [];
+    for (const a of n.attributes) {
+      let m;
+      const re = /url\(\s*["']?#([^"')\s]+)["']?\s*\)/g;
+      while ((m = re.exec(a.value))) out.push(m[1]);
+      if (/^(xlink:)?href$/.test(a.name) && a.value[0] === '#') out.push(a.value.slice(1));
+    }
+    return out;
+  };
+  let defs = null;
+  const seen = new Set();
+  const queue = [clone, ...clone.querySelectorAll('*')];
+  while (queue.length) {
+    const n = queue.shift();
+    for (const id of refs(n)) {
+      if (seen.has(id) || has(id)) continue;
+      seen.add(id);
+      const t = S.doc.getElementById(id);
+      if (!t || t.namespaceURI !== SVG_NS) continue;
+      const c = t.cloneNode(true);
+      const ts = [t, ...t.querySelectorAll('*')], cs2 = [c, ...c.querySelectorAll('*')];
+      ts.forEach((x, i) => {
+        if (x.tagName.toLowerCase() !== 'stop' || !cs2[i]) return;
+        const xs = getComputedStyle(x);
+        const pv = svgPaint(xs.stopColor);
+        cs2[i].setAttribute('stop-color', pv.v);
+        cs2[i].setAttribute('stop-opacity', String(r2((parseFloat(xs.stopOpacity) || 0) * pv.a * 1000) / 1000));
+        cs2[i].removeAttribute('style');
+        cs2[i].removeAttribute('class');
+      });
+      if (!defs) {
+        defs = S.doc.createElementNS(SVG_NS, 'defs');
+        clone.insertBefore(defs, clone.firstChild);
+      }
+      defs.appendChild(c);
+      queue.push(c, ...c.querySelectorAll('*'));
+    }
+  }
+  // Never leave a dangling reference: the importer would fail or paint black.
+  for (const n of [clone, ...clone.querySelectorAll('*')]) {
+    for (const a of [...n.attributes]) {
+      const m = /url\(\s*["']?#([^"')\s]+)/.exec(a.value);
+      if (m && !has(m[1])) n.removeAttribute(a.name);
+    }
+  }
 }
 
 // ---------- auto layout ----------
@@ -2466,7 +2745,12 @@ async function composeBackground(blob, bg) {
   const len = (v, ref) => (v === 'auto' ? null : /%$/.test(v) ? parseFloat(v) / 100 * ref : parseFloat(v));
   const sz = bg.size.split(/\s+/);
   let tw = len(sz[0], bg.aw), th = len(sz[1] || 'auto', bg.ah);
-  if (tw == null && th == null) {
+  if (/^(cover|contain)$/.test(sz[0])) {
+    const iw = nw || bg.aw, ih = nh || bg.ah;
+    const k = (sz[0] === 'cover' ? Math.max : Math.min)(bg.aw / iw, bg.ah / ih);
+    tw = iw * k;
+    th = ih * k;
+  } else if (tw == null && th == null) {
     if (nw && nh) { tw = nw; th = nh; } else { const k = Math.min(bg.aw / (nw || 1), bg.ah / (nh || 1)); tw = (nw || 1) * k; th = (nh || 1) * k; }
   } else if (tw == null) tw = nh ? th * nw / nh : th;
   else if (th == null) th = nw ? tw * nh / nw : tw;

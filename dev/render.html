@@ -157,9 +157,15 @@ function build(n, parent, images) {
   if (n.type === 'SVG') {
     el.style.width = n.w + 'px';
     el.style.height = n.h + 'px';
-    el.innerHTML = n.svg;
-    const svg = el.firstElementChild;
-    if (svg) { svg.style.display = 'block'; svg.setAttribute('width', n.w); svg.setAttribute('height', n.h); }
+    // Like Figma's importer: an isolated document (no ids from other SVGs of the
+    // page, no page CSS) that knows hex/rgb/hsl colors only.
+    const svgText = n.svg.replace(/(?:oklch|oklab|lab|lch|color|hwb)\([^()]*\)/gi, '#000000');
+    const img = document.createElement('img');
+    img.style.display = 'block';
+    img.style.width = n.w + 'px';
+    img.style.height = n.h + 'px';
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+    el.appendChild(img);
     parent ? parent.el.appendChild(el) : document.body.appendChild(el);
     return;
   }
@@ -264,6 +270,7 @@ window.renderTree = async (json) => {
     if (!m) return null;
     return new Promise((r) => { const i = new Image(); i.onload = i.onerror = r; i.src = m[1]; });
   }));
+  await Promise.all([...document.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
   const root = document.body.firstElementChild;
   return { w: root.offsetWidth, h: root.offsetHeight };
 };
