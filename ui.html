@@ -839,6 +839,7 @@ function extract(opts) {
   S.css = new WeakMap();
   S.deco = new Map();
   S.paint = new WeakMap();
+  S.hint = new WeakMap();
   S.icons = new WeakMap();
   S.fixed = [];
   const d = S.doc;
@@ -933,6 +934,9 @@ function walk(el, ox, oy) {
       if (saved == null) el.removeAttribute('style');
       else el.setAttribute('style', saved);
     }
+  }
+  if (out.length === 1 && el.nodeType === 1) {
+    try { S.hint.set(out[0], sizingHint(el, css(el))); } catch (e) {}
   }
   if (out.length && el.nodeType === 1 && css(el).position === 'fixed') {
     try { if (hoistFixed(el, out, ox, oy)) return []; } catch (e) {}
@@ -1432,7 +1436,7 @@ function walkEl(el, ox, oy) {
       boxes.forEach((b) => shift(b, rect.left, rect.top));
       const kids = pl ? pl.before.concat(boxes, [t], pl.after) : boxes.concat([t]);
       const f = frameNode(el, box, visual, common, paintOrder(kids));
-      tryAutoLayout(f, cs);
+      tryAutoLayout(f, cs, el);
       finalizeOrder(f);
       return [f];
     }
@@ -1475,7 +1479,7 @@ function walkEl(el, ox, oy) {
     delete f.clip;
     return [f];
   }
-  tryAutoLayout(f, cs);
+  tryAutoLayout(f, cs, el);
   finalizeOrder(f);
   return [f];
 }
@@ -3579,7 +3583,58 @@ function inlineDefs(clone) {
 
 // Turns a frame into Auto Layout only when its measured children already sit
 // exactly where Auto Layout would put them; otherwise positions stay absolute.
-function tryAutoLayout(frame, cs) {
+// How CSS sizes an element inside its parent: shrink-to-fit width, flex-grow.
+function sizingHint(el, cs) {
+  const h = { hugW: false, grow: 0, dir: null };
+  if (!el || !el.parentElement) return h;
+  const pcs = css(el.parentElement);
+  if (/^inline/.test(cs.display) || cs.float !== 'none' || /absolute|fixed/.test(cs.position)) h.hugW = true;
+  if (/flex/.test(pcs.display)) {
+    const prow = !/column/.test(pcs.flexDirection);
+    h.grow = parseFloat(cs.flexGrow) || 0;
+    h.dir = prow ? 'HORIZONTAL' : 'VERTICAL';
+    if (prow) h.hugW = h.hugW || h.grow === 0;
+    else if (!/stretch|normal/.test(cs.alignSelf === 'auto' ? pcs.alignItems : cs.alignSelf)) h.hugW = true;
+  } else if (/grid/.test(pcs.display)) {
+    if (/start|end|center|left|right/.test(cs.justifySelf === 'auto' ? pcs.justifyItems : cs.justifySelf)) h.hugW = true;
+  }
+  return h;
+}
+
+// Hug and fill, confirmed by geometry so the measured layout is reproduced exactly:
+// grow children fill the main axis, shrink-to-fit frames hug their content.
+function sizeLayout(frame, cs, el, kids, l) {
+  const T = 1.5;
+  const H = l.mode === 'HORIZONTAL';
+  const px = (p) => parseFloat(cs[p]) || 0;
+  const pad = { t: px('paddingTop') + px('borderTopWidth'), r: px('paddingRight') + px('borderRightWidth'), b: px('paddingBottom') + px('borderBottomWidth'), l: px('paddingLeft') + px('borderLeftWidth') };
+  const own = el ? sizingHint(el, cs) : {};
+  const len = (k) => (H ? k.w : k.h);
+  const growKids = kids.filter((k) => { const h = S.hint.get(k); return h && h.grow > 0 && h.dir === l.mode; });
+  if (growKids.length && l.primaryAlign !== 'SPACE_BETWEEN') {
+    if (growKids.length === 1 || growKids.every((k) => Math.abs(len(k) - len(growKids[0])) <= T)) growKids.forEach((k) => { k.grow = true; });
+  } else if (/grid/.test(cs.display) && H && kids.length > 1 && kids.every((k) => Math.abs(k.w - kids[0].w) <= T)
+    && Math.abs(l.pl - pad.l) <= T && Math.abs(l.pr - pad.r) <= T) {
+    kids.forEach((k) => { k.grow = true; }); // repeat(n, 1fr)
+  }
+  const anyGrow = kids.some((k) => k.grow);
+  // Content extent + CSS padding/border equals the box: hugging reproduces it.
+  const ext = (alongW) => {
+    if (alongW === H) { const a = Math.min(...kids.map((k) => (H ? k.x : k.y))); const z = Math.max(...kids.map((k) => (H ? k.x + k.w : k.y + k.h))); return z - a; }
+    return Math.max(...kids.map((k) => (alongW ? k.w : k.h)));
+  };
+  const fitsW = Math.abs(ext(true) + pad.l + pad.r - frame.w) <= T && Math.abs(l.pl - pad.l) <= T;
+  const fitsH = Math.abs(ext(false) + pad.t + pad.b - frame.h) <= T && Math.abs(l.pt - pad.t) <= T;
+  if (anyGrow && !H) l.primarySizing = 'FIXED';
+  if (H && own.hugW && !anyGrow && l.primaryAlign !== 'SPACE_BETWEEN' && fitsW) l.primarySizing = 'AUTO';
+  // Figma sizes a hugging frame from its non-filling children: one of them must span the content.
+  const cl = (k) => (H ? k.h : k.w);
+  const maxC = Math.max(...kids.map(cl));
+  const sizer = kids.some((k) => !k.stretch && Math.abs(cl(k) - maxC) <= T);
+  if (H ? fitsH && sizer : own.hugW && fitsW && sizer && !kids.some((k) => k.type === 'TEXT' && k.autoResize !== 'WIDTH_AND_HEIGHT')) l.counterSizing = 'AUTO';
+}
+
+function tryAutoLayout(frame, cs, el) {
   if (!S.opts.autoLayout) return;
   const kids = frame.children.filter((k) => !k.absolute);
   if (!kids.length) return;
@@ -3604,6 +3659,7 @@ function tryAutoLayout(frame, cs) {
       }
       frame.layout = layout;
       markStretch(frame, ordered, layout);
+      try { sizeLayout(frame, cs, el, ordered, layout); } catch (e) {}
       return;
     }
   }
@@ -3691,7 +3747,14 @@ function markStretch(frame, kids, l) {
     if (k.type === 'TEXT' && (H || k.autoResize === 'WIDTH_AND_HEIGHT')) continue;
     // A hugging column can't also fill the height of a row.
     if (H && k.layout && k.layout.primarySizing === 'AUTO') continue;
-    if (Math.abs((H ? k.h : k.w) - inner) <= 1.5) k.stretch = true;
+    if (Math.abs((H ? k.h : k.w) - inner) <= 1.5) {
+      k.stretch = true;
+      // Filling the parent wins over hugging on the same axis.
+      if (k.layout) {
+        if ((k.layout.mode === 'HORIZONTAL') === H) delete k.layout.counterSizing;
+        else if (k.layout.primarySizing === 'AUTO') k.layout.primarySizing = 'FIXED';
+      }
+    }
   }
 }
 

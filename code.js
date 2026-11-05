@@ -89,6 +89,7 @@ function buildNode(n, parent, ctx) {
     for (const c of n.children) buildNode(c, node, ctx);
     // Hug only after children exist, otherwise the frame collapses first.
     if (n.layout && n.layout.primarySizing === 'AUTO') node.primaryAxisSizingMode = 'AUTO';
+    if (n.layout && n.layout.counterSizing === 'AUTO') node.counterAxisSizingMode = 'AUTO';
   }
   return node;
 }
@@ -153,6 +154,10 @@ function place(node, n, parent) {
     node.y = n.y;
   } else if (auto) {
     if (n.stretch) node.layoutAlign = 'STRETCH';
+    if (n.grow) {
+      node.layoutGrow = 1;
+      if (node.type === 'TEXT' && node.textAutoResize === 'WIDTH_AND_HEIGHT') node.textAutoResize = 'HEIGHT';
+    }
   } else {
     node.x = n.x;
     node.y = n.y;

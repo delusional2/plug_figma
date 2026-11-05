@@ -56,6 +56,7 @@ class Node {
   set isMask(v) { if (typeof v !== 'boolean') fail('isMask'); if (!this.parent) fail('isMask before append'); this._mask = v; } get isMask() { return !!this._mask; }
   set maskType(v) { oneOf(v, ['ALPHA', 'VECTOR', 'LUMINANCE'], 'maskType'); if (!this._mask) fail('maskType without isMask'); }
   set constraints(v) { keysOnly(v, ['horizontal', 'vertical'], 'constraints'); oneOf(v.horizontal, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.horizontal'); oneOf(v.vertical, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.vertical'); this._cons = v; } get constraints() { return this._cons; }
+  set layoutGrow(v) { oneOf(v, [0, 1], 'layoutGrow'); if (!this.parent || !this.parent.layoutMode || this.parent.layoutMode === 'NONE') fail('layoutGrow outside AL'); this._lg = v; } get layoutGrow() { return this._lg || 0; }
   set layoutPositioning(v) { oneOf(v, ['AUTO', 'ABSOLUTE'], 'layoutPositioning'); if (v === 'ABSOLUTE' && (!this.parent || !this.parent.layoutMode || this.parent.layoutMode === 'NONE')) fail('ABSOLUTE outside AL'); this._lp = v; } get layoutPositioning() { return this._lp; }
 }
 class Frame extends Node {
@@ -111,7 +112,7 @@ class Text extends Node {
   setRangeLetterSpacing(a, b, v) { this._range(a, b); keysOnly(v, ['value', 'unit'], 'ls'); num(v.value, 'ls'); }
   setRangeLineHeight(a, b, v) { this._range(a, b); if (v.unit === 'AUTO') keysOnly(v, ['unit'], 'lh'); else { keysOnly(v, ['value', 'unit'], 'lh'); num(v.value, 'lh'); } }
   setRangeTextCase(a, b, v) { this._range(a, b); oneOf(v, ['ORIGINAL', 'UPPER', 'LOWER', 'TITLE'], 'textCase'); }
-  set textAutoResize(v) { oneOf(v, ['NONE', 'WIDTH_AND_HEIGHT', 'HEIGHT', 'TRUNCATE'], 'textAutoResize'); this._ar = v; }
+  set textAutoResize(v) { oneOf(v, ['NONE', 'WIDTH_AND_HEIGHT', 'HEIGHT', 'TRUNCATE'], 'textAutoResize'); this._ar = v; } get textAutoResize() { return this._ar || 'NONE'; }
   set textAlignHorizontal(v) { oneOf(v, ['LEFT', 'CENTER', 'RIGHT', 'JUSTIFIED'], 'align'); }
   set textTruncation(v) { oneOf(v, ['DISABLED', 'ENDING'], 'textTruncation'); this._tt = v; } get textTruncation() { return this._tt || 'DISABLED'; }
   set maxLines(v) { if (v !== null && !(Number.isInteger(v) && v >= 1)) fail('maxLines: bad value ' + v); if (v !== null && this._tt !== 'ENDING') fail('maxLines without textTruncation ENDING'); this._ml = v; } get maxLines() { return this._ml == null ? null : this._ml; }

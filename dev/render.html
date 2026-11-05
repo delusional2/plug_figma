@@ -112,6 +112,8 @@ function build(n, parent, images) {
     el.style.position = 'relative';
     el.style.flex = 'none';
     if (n.stretch) el.style.alignSelf = 'stretch';
+    // layoutGrow: at import time Figma's fill gives the measured size (equal fills,
+    // or the only fill taking the rest), which is what the fixed size already draws.
     // Figma allows a negative itemSpacing, CSS gap does not.
     if (parent.layout.spacing < 0 && parent.flowCount++ > 0) el.style[parent.layout.mode === 'HORIZONTAL' ? 'marginLeft' : 'marginTop'] = parent.layout.spacing + 'px';
   } else {
@@ -240,6 +242,10 @@ function build(n, parent, images) {
     if (l.primarySizing === 'AUTO') {
       if (l.mode === 'VERTICAL') el.style.height = 'auto';
       else el.style.width = 'auto';
+    }
+    if (l.counterSizing === 'AUTO') {
+      if (l.mode === 'VERTICAL') el.style.width = 'auto';
+      else el.style.height = 'auto';
     }
   }
   if (n.stretch && inLayout) {
