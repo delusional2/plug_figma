@@ -102,12 +102,20 @@ function createNode(n, ctx) {
 
 function shapeNode(node, n, ctx) {
   if (n.type === 'TEXT') {
-    if (n.autoResize === 'WIDTH_AND_HEIGHT') {
+    if (n.autoResize === 'WIDTH_AND_HEIGHT' && !n.truncate) {
       node.textAutoResize = 'WIDTH_AND_HEIGHT';
     } else {
       node.resize(Math.max(1, n.w), Math.max(1, n.h));
       node.textAutoResize = 'HEIGHT';
     }
+    // text-overflow: ellipsis / line-clamp (maxLines only works with ENDING).
+    if (n.truncate) {
+      try {
+        node.textTruncation = 'ENDING';
+        node.maxLines = Math.max(1, Math.round(n.truncate));
+      } catch (e) { /* older API: the full text stays visible */ }
+    }
+    if (n.effects && n.effects.length) setEffects(node, n.effects);
   } else if (n.type === 'SVG') {
     node.name = n.name || 'svg';
     if (Math.abs(node.width - n.w) > 0.5 || Math.abs(node.height - n.h) > 0.5) {
@@ -224,8 +232,20 @@ function toPaint(p, ctx) {
 
 // ---------- images ----------
 
+function withTimeout(promise, ms) {
+  let timer = 0;
+  const limit = new Promise(function (resolve, reject) {
+    timer = setTimeout(function () { reject(new Error('timeout')); }, ms);
+  });
+  return Promise.race([promise, limit]).then(
+    function (v) { clearTimeout(timer); return v; },
+    function (e) { clearTimeout(timer); throw e; }
+  );
+}
+
 async function prepareImages(list) {
   const hashes = {};
+  const remote = [];
   for (const im of list) {
     if (im.bytes) {
       try {
@@ -233,13 +253,25 @@ async function prepareImages(list) {
         continue;
       } catch (e) {}
     }
-    // The UI could not read the file (usually CORS) — let Figma try the URL itself.
-    if (im.url && /^https?:/i.test(im.url)) {
+    // The UI could not read the file (usually CORS) — let Figma try the URL itself,
+    // unless the UI already gave up on it as too slow (it gets the placeholder).
+    if (!im.slow && im.url && /^https?:/i.test(im.url)) remote.push(im);
+  }
+  let next = 0;
+  let settled = 0;
+  async function worker() {
+    while (next < remote.length) {
+      const im = remote[next++];
       try {
-        hashes[im.ref] = (await figma.createImageAsync(im.url)).hash;
+        hashes[im.ref] = (await withTimeout(figma.createImageAsync(im.url), 15000)).hash;
       } catch (e) {}
+      settled++;
+      progress('Добавляю картинки ' + settled + '/' + remote.length + '…');
     }
   }
+  const pool = [];
+  for (let i = 0; i < Math.min(4, remote.length); i++) pool.push(worker());
+  await Promise.all(pool);
   return hashes;
 }
 

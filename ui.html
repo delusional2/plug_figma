@@ -95,6 +95,7 @@
   #status { min-height: 18px; color: var(--figma-color-text-secondary, #757575); }
   #status.error { color: var(--figma-color-text-danger, #f24822); }
   #status.ok { color: var(--figma-color-text-success, #14ae5c); }
+  #status.warn { color: var(--figma-color-text-warning, #b86200); }
   /* The page being imported renders here, under the UI. It is scaled to fit
      the plugin window so scroll-triggered effects inside it still fire. */
   #stage {
@@ -154,6 +155,9 @@
 // read the iframe's DOM from outside. The agent measures the page and posts
 // the finished layer tree back to the UI.
 function pageAgent() {
+// prepareHtml() puts the agent at the very top of <head>; never run twice.
+if (window.__h2fAgent) return;
+window.__h2fAgent = true;
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'BASE', 'WBR']);
 const ATOMIC_TAGS = new Set(['IMG', 'SVG', 'VIDEO', 'CANVAS', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'OBJECT', 'EMBED', 'PICTURE', 'AUDIO']);
 const ALIGN = { left: 'LEFT', start: 'LEFT', '-webkit-left': 'LEFT', right: 'RIGHT', end: 'RIGHT', '-webkit-right': 'RIGHT', center: 'CENTER', '-webkit-center': 'CENTER', justify: 'JUSTIFIED' };
@@ -166,7 +170,11 @@ const PLACEHOLDER_FILL = { type: 'SOLID', color: { r: 0.86, g: 0.86, b: 0.88 }, 
 // Finish CSS animations instantly so elements are caught in their final state.
 const KILL_MOTION = '*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;transition-duration:0s!important;transition-delay:0s!important}html{scroll-behavior:auto!important}';
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The agent's own timers and fetches must not count as "the page is still busy".
+const _setTimeout = window.setTimeout.bind(window);
+const _clearTimeout = window.clearTimeout.bind(window);
+const _fetch = window.fetch ? window.fetch.bind(window) : null;
+const sleep = (ms) => new Promise((r) => _setTimeout(r, ms));
 const r2 = (v) => Math.round(v * 100) / 100;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
@@ -178,10 +186,67 @@ motion.textContent = KILL_MOTION;
 
 const send = (msg) => parent.postMessage(Object.assign({ h2f: true }, msg), '*');
 
+// Pending async work of the page (SPAs render after fetch / setTimeout), tracked
+// from the top of <head> so that settle() can wait until the DOM stops changing.
+const PEND = { net: 0, timers: new Set(), depth: 0, lastMut: performance.now() };
+(function track() {
+  try {
+    const st = window.setTimeout, ct = window.clearTimeout;
+    window.setTimeout = function (fn, ms) {
+      const d = +ms || 0;
+      if (typeof fn !== 'function' || d < 50 || d > 5000) return st.apply(window, arguments);
+      const rest = [].slice.call(arguments, 2);
+      let id;
+      const wrapped = function () {
+        PEND.timers.delete(id);
+        PEND.depth++;
+        try { return fn.apply(this, arguments); } finally { PEND.depth--; }
+      };
+      id = st.apply(window, [wrapped, d].concat(rest));
+      // Chains (a timer scheduling the next one: carousels, typewriters) never end.
+      if (!PEND.depth) PEND.timers.add(id);
+      return id;
+    };
+    window.clearTimeout = function (id) { PEND.timers.delete(id); return ct.apply(window, arguments); };
+  } catch (e) {}
+  try {
+    if (window.fetch) {
+      const f = window.fetch;
+      window.fetch = function () {
+        PEND.net++;
+        let p;
+        try { p = f.apply(window, arguments); } catch (e) { PEND.net--; throw e; }
+        const dec = () => { PEND.net--; };
+        Promise.resolve(p).then(dec, dec);
+        return p;
+      };
+    }
+  } catch (e) {}
+  try {
+    const xs = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function () {
+      let open = true;
+      const end = () => { if (open) { open = false; PEND.net--; } };
+      PEND.net++;
+      this.addEventListener('loadend', end);
+      try { return xs.apply(this, arguments); } catch (e) { end(); throw e; }
+    };
+  } catch (e) {}
+  try {
+    new MutationObserver(() => { PEND.lastMut = performance.now(); })
+      .observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  } catch (e) {}
+})();
+
 addEventListener('message', async (e) => {
   if (e.source !== parent || !e.data || e.data.h2f !== 'extract') return;
+  send({ kind: 'ack' });
   try {
     const opts = e.data.opts;
+    const warnings = [];
+    send({ kind: 'progress', text: 'Жду, пока страница догрузится…' });
+    try { if (!(await tailwindOk())) warnings.push('tailwind'); } catch (err) {}
+    try { forceLightScheme(); } catch (err) {}
     await settle();
     // Scroll through the page so lazy images and "reveal on scroll" scripts fire.
     const total = docHeight();
@@ -196,14 +261,27 @@ addEventListener('message', async (e) => {
     const root = extract(opts);
     const list = [...S.images.values()];
     if (list.length) await loadImages(list, (i, n) => send({ kind: 'progress', text: `Загружаю картинки ${i}/${n}…` }));
-    const images = list.map((it) => ({ ref: it.ref, url: /^https?:/i.test(it.url) ? it.url : null, bytes: it.bytes || null }));
-    send({ kind: 'result', root, images });
+    const images = list.map((it) => ({ ref: it.ref, url: /^https?:/i.test(it.url) ? it.url : null, bytes: it.bytes || null, slow: it.slow || undefined }));
+    send({ kind: 'result', root, images, warnings });
   } catch (err) {
     send({ kind: 'error', message: String((err && err.message) || err) });
   }
 });
+send({ kind: 'ready' });
+
+// Resolves once the page has had no pending fetch/XHR/short timer and no DOM
+// mutation for a moment (or when the time budget runs out: some pages never rest).
+async function quiet(ms) {
+  const end = performance.now() + ms;
+  while (performance.now() < end) {
+    const busy = PEND.net > 0 || PEND.timers.size > 0 || document.querySelector('[aria-busy="true"]');
+    if (!busy && performance.now() - PEND.lastMut > 400) return;
+    await sleep(50);
+  }
+}
 
 async function settle() {
+  await quiet(8000);
   try { await Promise.race([document.fonts.ready, sleep(5000)]); } catch (e) {}
   const pending = [...document.images].filter((i) => !i.complete).map((i) => new Promise((r) => {
     i.addEventListener('load', r, { once: true });
@@ -211,6 +289,46 @@ async function settle() {
   }));
   await Promise.race([Promise.all(pending), sleep(8000)]);
   await sleep(300);
+}
+
+// The Tailwind CDN compiles utilities at runtime; when it failed to load the page
+// is silently unstyled, so check that a utility class actually took effect.
+async function tailwindOk() {
+  const uses = [...document.scripts].some((s) => /tailwind/i.test(s.src)) || document.querySelector('style[type="text/tailwindcss"]');
+  if (!uses || !document.body) return true;
+  const probe = document.createElement('div');
+  probe.className = 'hidden';
+  document.body.appendChild(probe);
+  let ok = false;
+  for (let t = 0; t < 8000; t += 100) {
+    if (getComputedStyle(probe).display === 'none') { ok = true; break; }
+    await sleep(100);
+  }
+  probe.remove();
+  return ok;
+}
+
+// The UI asks for a light stage; if the engine ignored that, neutralise the
+// page's prefers-color-scheme: dark rules so the import doesn't follow the OS theme.
+function forceLightScheme() {
+  if (!matchMedia('(prefers-color-scheme: dark)').matches) return;
+  const fix = (t) => t.replace(/\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi, '(max-width: 0px)')
+    .replace(/\(\s*prefers-color-scheme\s*:\s*light\s*\)/gi, '(min-width: 0px)');
+  const walkRules = (rules) => {
+    for (const r of rules) {
+      try {
+        if (r.media && /prefers-color-scheme/i.test(r.media.mediaText)) r.media.mediaText = fix(r.media.mediaText);
+        if (r.cssRules) walkRules(r.cssRules);
+      } catch (e) {}
+    }
+  };
+  for (const sh of document.styleSheets) {
+    try { walkRules(sh.cssRules); } catch (e) { /* cross-origin sheet */ }
+  }
+  for (const el of document.querySelectorAll('link[media], source[media], style[media]')) {
+    const m = el.getAttribute('media');
+    if (/prefers-color-scheme/i.test(m)) el.setAttribute('media', fix(m));
+  }
 }
 
 function docHeight() {
@@ -261,12 +379,18 @@ function extract(opts) {
 
 function childrenOf(el, ox, oy) {
   const out = [];
+  const closed = inClosedDetails(el);
   for (const c of el.childNodes) {
-    if (c.nodeType === 3) {
-      const t = looseText(c, el, ox, oy);
-      if (t) out.push(t);
-    } else if (c.nodeType === 1) {
-      for (const n of walk(c, ox, oy)) out.push(n);
+    // One broken element must never cost the whole import.
+    try {
+      if (c.nodeType === 3) {
+        if (closed) continue;
+        for (const t of [].concat(looseText(c, el, ox, oy) || [])) out.push(t);
+      } else if (c.nodeType === 1) {
+        for (const n of walk(c, ox, oy)) out.push(n);
+      }
+    } catch (e) {
+      console.warn('html-to-figma: skipped a node', e);
     }
   }
   return out;
@@ -283,8 +407,10 @@ function walk(el, ox, oy) {
   if (cs.visibility !== 'visible') return [];
   const opacity = parseFloat(cs.opacity);
   if (opacity === 0) return [];
+  if (hiddenByEngine(el, cs)) return [];
 
   const rect = el.getBoundingClientRect();
+  if (isVisuallyHidden(cs, rect)) return [];
   const box = { x: r2(rect.left - ox), y: r2(rect.top - oy), w: r2(rect.width), h: r2(rect.height) };
   const common = {
     absolute: cs.position === 'absolute' || cs.position === 'fixed',
@@ -305,14 +431,24 @@ function walk(el, ox, oy) {
   const visual = boxVisual(el, cs, box);
 
   if (isTextBlock(el)) {
-    const t = blockText(el, cs);
+    const painted = S.inlinePaint;
+    const t = blockText(el, cs, painted);
+    if (Array.isArray(t)) {
+      // A wrapping inline element split into first line + rest.
+      t.forEach((k) => { shift(k, ox, oy); Object.assign(k, common); });
+      return t;
+    }
     if (t) {
-      if (!visual.has) {
+      const boxes = painted ? inlineBoxes(painted) : [];
+      const clipped = visual.clip && t.overflowsBox;
+      delete t.overflowsBox;
+      if (!visual.has && !clipped && !boxes.length) {
         shift(t, ox, oy);
         return [Object.assign(t, common)];
       }
       shift(t, rect.left, rect.top);
-      const f = frameNode(el, box, visual, common, [t]);
+      boxes.forEach((b) => shift(b, rect.left, rect.top));
+      const f = frameNode(el, box, visual, common, boxes.concat([t]));
       tryAutoLayout(f, cs);
       return [f];
     }
@@ -341,6 +477,50 @@ function walk(el, ox, oy) {
   const f = frameNode(el, box, visual, common, kids);
   tryAutoLayout(f, cs);
   return [f];
+}
+
+// Content the engine doesn't paint although its own style says it's visible:
+// closed <details> (::details-content is content-visibility:hidden), hidden=until-found.
+function hiddenByEngine(el, cs) {
+  if (cs.display === 'contents') return false; // no box: decided per child
+  try { if (el.checkVisibility) return !el.checkVisibility(); } catch (e) {}
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    if (a.tagName === 'DETAILS' && !a.open) {
+      const s = [...a.children].find((c) => c.tagName === 'SUMMARY');
+      if (!s || !(s === el || s.contains(el))) return true;
+    }
+  }
+  return false;
+}
+
+// Loose text directly in a closed <details> always goes to the hidden slot.
+function inClosedDetails(el) {
+  for (let e = el; e && e.nodeType === 1; e = e.parentElement) {
+    if (e.tagName === 'DETAILS') return !e.open;
+    if (css(e).display !== 'contents') return false;
+  }
+  return false;
+}
+
+// sr-only / visually-hidden: present for screen readers, invisible on screen.
+function isVisuallyHidden(cs, rect) {
+  const pos = cs.position === 'absolute' || cs.position === 'fixed';
+  if (pos && cs.clip && cs.clip !== 'auto') {
+    const m = /rect\(([^)]*)\)/.exec(cs.clip);
+    if (m) {
+      const v = m[1].split(/[\s,]+/).filter(Boolean).map((s) => (s === 'auto' ? null : parseFloat(s)));
+      const top = v[0] == null ? -Infinity : v[0], right = v[1] == null ? Infinity : v[1];
+      const bottom = v[2] == null ? Infinity : v[2], left = v[3] == null ? -Infinity : v[3];
+      if (bottom - top <= 1 || right - left <= 1) return true;
+    }
+  }
+  const ip = /^inset\(\s*([^)]*?)\s*\)$/.exec((cs.clipPath || '').replace(/\s+round\s[^)]*\)$/, ')'));
+  if (ip) {
+    const p = ip[1].split(/\s+/).map((s) => (/%$/.test(s) ? parseFloat(s) : NaN));
+    const t = p[0], r = p.length > 1 ? p[1] : t, b = p.length > 2 ? p[2] : t, l = p.length > 3 ? p[3] : r;
+    if (t + b >= 100 || l + r >= 100) return true; // NaN (non-% values) never passes
+  }
+  return rect.width <= 1.01 && rect.height <= 1.01 && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible');
 }
 
 function shift(node, ox, oy) {
@@ -628,7 +808,8 @@ function parseStops(parts, len) {
 // so it can become one text layer with styled ranges.
 function isTextBlock(el) {
   let hasText = false;
-  let boxyInline = false;
+  const painted = [];
+  S.inlinePaint = null;
   const ok = (function scan(node) {
     for (const c of node.childNodes) {
       if (c.nodeType === 3) {
@@ -640,19 +821,33 @@ function isTextBlock(el) {
       if (SKIP_TAGS.has(tag) || tag === 'BR') continue;
       if (ATOMIC_TAGS.has(tag)) return false;
       const ccs = css(c);
-      if (ccs.display === 'none') continue;
-      if (ccs.display !== 'inline' && ccs.display !== 'contents') return false;
+      if (ccs.display === 'none' || hiddenByEngine(c, ccs)) continue;
+      if (ccs.display !== 'inline' && ccs.display !== 'contents' && !plainInlineBlock(c, ccs)) return false;
       if (ccs.position === 'absolute' || ccs.position === 'fixed') return false;
-      if (hasPaint(ccs)) boxyInline = true;
+      if (hasPaint(ccs)) painted.push(c);
       if (!scan(c)) return false;
     }
     return true;
   })(el);
   if (!ok || !hasText) return false;
   // Inline badges / <code> with a background: on a single line, keep them as
-  // separate boxes; inside wrapping paragraphs, merging the text is the lesser evil.
-  if (boxyInline) return lineCount(el) > 1;
+  // separate boxes; inside wrapping paragraphs, merge the text and draw the
+  // boxes behind it (see inlineBoxes).
+  if (painted.length) {
+    if (lineCount(el) < 2) return false;
+    S.inlinePaint = painted;
+  }
   return true;
+}
+
+// An inline-block that adds no box of its own (no paint, no horizontal
+// padding/border/margin, one line of plain text) flows exactly like inline text.
+function plainInlineBlock(c, ccs) {
+  if (!/^inline-(block|flex)$/.test(ccs.display) || hasPaint(ccs)) return false;
+  const n = (p) => Math.abs(parseFloat(ccs[p]) || 0);
+  const edge = n('paddingLeft') + n('paddingRight') + n('borderLeftWidth') + n('borderRightWidth') + n('marginLeft') + n('marginRight');
+  const v = n('paddingTop') + n('paddingBottom') + n('borderTopWidth') + n('borderBottomWidth') + n('marginTop') + n('marginBottom');
+  return edge < 1 && v < 1 && lineCount(c) === 1;
 }
 
 function lineCount(target) {
@@ -672,14 +867,17 @@ function gatherRuns(root) {
   (function rec(node) {
     for (const c of node.childNodes) {
       if (c.nodeType === 3) {
-        runs.push({ raw: c.data, el: node });
+        if (node.tagName === 'DETAILS' && !node.open) continue;
+        runs.push({ raw: c.data, el: node, node: c });
       } else if (c.nodeType === 1) {
         const tag = c.tagName.toUpperCase();
         if (tag === 'BR') {
           runs.push({ raw: '\n', el: node, hard: true });
           continue;
         }
-        if (SKIP_TAGS.has(tag) || css(c).display === 'none') continue;
+        if (SKIP_TAGS.has(tag)) continue;
+        const ccs = css(c);
+        if (ccs.display === 'none' || hiddenByEngine(c, ccs)) continue;
         rec(c);
       }
     }
@@ -688,11 +886,26 @@ function gatherRuns(root) {
 }
 
 // Collapses whitespace the way the browser does and merges runs with equal style.
-function toSegments(runs, colorOverride) {
+// extra (optional): { before: Map(runIndex -> px), after: Map(runIndex -> px) } adds
+// letter spacing to the character before / the last character of a run, so the
+// padding of an inline box that is drawn separately still advances the text.
+function toSegments(runs, colorOverride, extra) {
   const segs = [];
   let atLineStart = true;
   let pre = false;
-  for (const r of runs) {
+  const bump = (px) => {
+    const prev = segs[segs.length - 1];
+    if (!prev || !px) return;
+    if (prev.bumped) { prev.letterSpacing = r2(prev.letterSpacing + px); return; }
+    const n = /[\uDC00-\uDFFF]$/.test(prev.text) ? 2 : 1;
+    const ch = prev.text.slice(-n);
+    prev.text = prev.text.slice(0, -n);
+    const one = Object.assign({}, prev, { text: ch, letterSpacing: r2(prev.letterSpacing + px), bumped: true, key: prev.key + '#bump' + segs.length });
+    if (!prev.text) segs.pop();
+    segs.push(one);
+  };
+  runs.forEach((r, i) => {
+    if (extra && extra.before.has(i)) bump(extra.before.get(i));
     const cs = css(r.el);
     let t = r.raw;
     if (!r.hard) {
@@ -702,13 +915,15 @@ function toSegments(runs, colorOverride) {
       else if (!pre) t = t.replace(/[ \t\n\r\f]+/g, ' ');
       if (atLineStart && !pre) t = t.replace(/^ /, '');
     }
-    if (!t) continue;
-    const style = segStyle(r.el, cs, colorOverride);
-    const prev = segs[segs.length - 1];
-    if (prev && prev.key === style.key) prev.text += t;
-    else segs.push(Object.assign(style, { text: t }));
-    atLineStart = /[ \n]$/.test(t);
-  }
+    if (t) {
+      const style = segStyle(r.el, cs, colorOverride);
+      const prev = segs[segs.length - 1];
+      if (prev && prev.key === style.key) prev.text += t;
+      else segs.push(Object.assign(style, { text: t }));
+      atLineStart = /[ \n]$/.test(t);
+    }
+    if (extra && extra.after.has(i)) bump(extra.after.get(i));
+  });
   while (segs.length) {
     const last = segs[segs.length - 1];
     last.text = pre ? last.text.replace(/\n$/, '') : last.text.replace(/[ \n]+$/, '');
@@ -718,6 +933,7 @@ function toSegments(runs, colorOverride) {
   for (const s of segs) {
     if (!pre) s.text = s.text.replace(/ +\n/g, '\n');
     delete s.key;
+    delete s.bumped;
   }
   return segs.filter((s) => s.text);
 }
@@ -784,66 +1000,307 @@ function contentBox(el, cs) {
   };
 }
 
+// Line boxes of a text node or an element's text, from text-node rects only
+// (the border boxes of padded inline elements would skew them). Each rect gets
+// the half-leading of its own element, which goes negative when line-height is
+// tighter than the font's content area (leading-none, h1 {line-height:1.1}).
+function textLines(target) {
+  const lines = [];
+  const add = (tn, a, b) => {
+    const rg = S.doc.createRange();
+    rg.setStart(tn, a);
+    rg.setEnd(tn, b);
+    const lh = parseFloat(css(tn.parentElement).lineHeight);
+    for (const q of rg.getClientRects()) {
+      if (q.width <= 0.5 || q.height <= 0.5) continue;
+      const hl = Number.isFinite(lh) ? (lh - q.height) / 2 : 0;
+      const mid = (q.top + q.bottom) / 2;
+      let line = lines.find((l) => mid > l.gt && mid < l.gb);
+      if (!line) lines.push(line = { gt: q.top, gb: q.bottom, top: Infinity, bottom: -Infinity, l: Infinity, r: -Infinity });
+      line.top = Math.min(line.top, q.top - hl);
+      line.bottom = Math.max(line.bottom, q.bottom + hl);
+      line.l = Math.min(line.l, q.left);
+      line.r = Math.max(line.r, q.right);
+    }
+  };
+  if (target.nodeType === 3) {
+    const a = target.data.search(/\S/);
+    if (a < 0) return null;
+    add(target, a, target.data.replace(/\s+$/, '').length);
+  } else {
+    const w = S.doc.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) if (/\S/.test(n.data)) add(n, 0, n.data.length);
+  }
+  if (!lines.length) return null;
+  lines.sort((p, q) => p.gt - q.gt);
+  const m = { lines, L: Infinity, R: -Infinity, top: Infinity, bottom: -Infinity };
+  for (const l of lines) {
+    m.L = Math.min(m.L, l.l); m.R = Math.max(m.R, l.r);
+    m.top = Math.min(m.top, l.top); m.bottom = Math.max(m.bottom, l.bottom);
+  }
+  return m;
+}
+
+const isNoWrap = (cs) => cs.textWrapMode === 'nowrap' || /^(pre|nowrap)$/.test(cs.whiteSpace);
+
 // Where to put the text layer, in page coordinates.
 // alignBox: the box single-line text sits in (lets us detect its alignment);
 // wrapBox: the width multi-line text wraps at.
 function textGeometry(target, cs, alignBox, wrapBox) {
-  const range = S.doc.createRange();
-  range.selectNodeContents(target);
-  if (target.nodeType === 3) {
-    // Measure without the edge spaces we strip from the text itself.
-    range.setStart(target, target.data.search(/\S/));
-    range.setEnd(target, target.data.replace(/\s+$/, '').length);
-  }
-  const rects = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
-  if (!rects.length) return null;
-  let L = Infinity, T = Infinity, R = -Infinity, B = -Infinity;
-  const lines = [];
-  for (const r of rects) {
-    L = Math.min(L, r.left); T = Math.min(T, r.top);
-    R = Math.max(R, r.right); B = Math.max(B, r.bottom);
-    const mid = (r.top + r.bottom) / 2;
-    if (!lines.some((l) => mid > l.top && mid < l.bottom)) lines.push({ top: r.top, bottom: r.bottom });
-  }
-  // Range rects cover glyphs only; add the half-leading so the layer matches the line box.
-  const lh = parseFloat(cs.lineHeight);
-  const hl = Number.isFinite(lh) ? Math.max(0, (lh - rects[0].height) / 2) : 0;
-  const y = T - hl;
-  const h = B - T + 2 * hl;
+  const m = textLines(target);
+  if (!m) return null;
+  const { L, R } = m;
+  const y = m.top;
+  const h = m.bottom - m.top;
+  const align = ALIGN[cs.textAlign] || 'LEFT';
 
-  if (lines.length > 1) {
-    const box = wrapBox || { x: L, w: R - L };
-    return { x: box.x, y, w: box.w, h, align: ALIGN[cs.textAlign] || 'LEFT', autoResize: 'HEIGHT' };
+  if (m.lines.length > 1 && isNoWrap(cs)) {
+    // Only the hard breaks wrap: an auto-width box keeps Figma from wrapping more.
+    return { x: L, y, w: R - L, h, align, autoResize: 'WIDTH_AND_HEIGHT' };
+  }
+  if (m.lines.length > 1) {
+    let wl = wrapBox ? wrapBox.x : L;
+    let wr = wrapBox ? wrapBox.x + wrapBox.w : R;
+    // Text that is an anonymous flex/grid item wraps between its siblings, not
+    // across the whole container.
+    const host = target.nodeType === 3 ? target.parentElement : target;
+    const hcs = css(host);
+    if (/flex|grid/.test(hcs.display) && !/column/.test(hcs.flexDirection)) {
+      const gap = parseFloat(hcs.columnGap) || 0;
+      for (const c of host.children) {
+        const ccs = css(c);
+        if (ccs.display === 'none' || ccs.position === 'absolute' || ccs.position === 'fixed') continue;
+        const cr = c.getBoundingClientRect();
+        if (cr.bottom <= m.top || cr.top >= m.bottom) continue;
+        if (cr.left >= R - 0.5) wr = Math.min(wr, cr.left - gap);
+        if (cr.right <= L + 0.5) wl = Math.max(wl, cr.right + gap);
+      }
+    }
+    wr = Math.max(wr, Math.ceil(R));
+    wl = Math.min(wl, Math.floor(L));
+    if (align === 'LEFT' || align === 'JUSTIFIED') wl = L;
+    return { x: wl, y, w: wr - wl, h, align, autoResize: 'HEIGHT' };
   }
   if (alignBox && alignBox.w - (R - L) > 8) {
     const gl = L - alignBox.x;
     const gr = alignBox.x + alignBox.w - R;
-    const align = Math.abs(gl) < 2 ? 'LEFT' : Math.abs(gr) < 2 ? 'RIGHT' : Math.abs(gl - gr) < 2 ? 'CENTER' : null;
-    if (align) return { x: alignBox.x, y, w: alignBox.w, h, align, autoResize: 'HEIGHT' };
+    const al = Math.abs(gl) < 2 ? 'LEFT' : Math.abs(gr) < 2 ? 'RIGHT' : Math.abs(gl - gr) < 2 ? 'CENTER' : null;
+    if (al) return { x: alignBox.x, y, w: alignBox.w, h, align: al, autoResize: 'HEIGHT' };
   }
   return { x: L, y, w: R - L, h, align: 'LEFT', autoResize: 'WIDTH_AND_HEIGHT' };
 }
 
-function textNode(segs, g) {
-  return { type: 'TEXT', x: r2(g.x), y: r2(g.y), w: r2(g.w), h: r2(g.h), segments: segs, align: g.align, autoResize: g.autoResize };
+function textNode(segs, g, cs) {
+  const t = { type: 'TEXT', x: r2(g.x), y: r2(g.y), w: r2(g.w), h: r2(g.h), segments: segs, align: g.align, autoResize: g.autoResize };
+  const fx = cs ? textEffects(cs) : [];
+  if (fx.length) t.effects = fx;
+  return t;
 }
 
-function blockText(el, cs) {
-  const segs = toSegments(gatherRuns(el));
+// text-shadow -> drop shadows (no spread, not clipped under the glyphs).
+function textEffects(cs) {
+  if (!cs.textShadow || cs.textShadow === 'none') return [];
+  return parseShadows(cs.textShadow)
+    .filter((e) => e.type === 'DROP_SHADOW')
+    .map((e) => Object.assign(e, { spread: 0, showShadowBehindNode: true }));
+}
+
+// overflow + text-overflow / line-clamp: what the browser cuts, Figma truncates
+// (textTruncation/maxLines); other clipped overflow is flagged for a clipping frame.
+// t and cb are in page coordinates. keepX: loose text that starts after a sibling.
+function clampText(t, cs, cb, keepX) {
+  if (cs.overflowX === 'visible' && cs.overflowY === 'visible') return;
+  const right = cb.x + cb.w;
+  const overX = t.x + t.w > right + 1 || t.x < cb.x - 1;
+  const overY = t.y + t.h > cb.y + cb.h + 1 || t.y < cb.y - 1;
+  const clamp = parseInt(cs.webkitLineClamp || cs.lineClamp, 10);
+  const oneLine = !t.segments.some((s) => /\n/.test(s.text));
+  if (overX && cs.overflowX !== 'visible' && isNoWrap(cs) && cs.textOverflow === 'ellipsis' && oneLine) {
+    if (!keepX) t.x = r2(cb.x);
+    t.w = r2(Math.max(1, right - t.x));
+    t.autoResize = 'HEIGHT';
+    if (!keepX) t.align = ALIGN[cs.textAlign] || 'LEFT';
+    t.truncate = 1;
+    // nowrap: Figma must cut by character like CSS, not at the last word.
+    for (const s of t.segments) s.text = s.text.replace(/ /g, ' ');
+  } else if (clamp > 0 && overY) {
+    t.x = r2(cb.x);
+    t.w = r2(cb.w);
+    t.h = r2(Math.min(t.h, cb.h));
+    t.autoResize = 'HEIGHT';
+    t.truncate = clamp;
+  } else if (overX || overY) {
+    t.overflowsBox = true;
+  }
+}
+
+// The content box of the nearest block container (what an inline element wraps in).
+function blockWrapBox(el) {
+  for (let e = el.parentElement; e; e = e.parentElement) {
+    const c = css(e);
+    if (!/^inline/.test(c.display) && c.display !== 'contents') return contentBox(e, c);
+  }
+  return null;
+}
+
+// Wrapped text whose first line starts right of the wrap edge (after an
+// inline-block badge, an icon or text-indent): Figma can't indent just the first
+// line, so the first line becomes its own layer and the rest wraps from the edge.
+function splitFirstLine(runs, cs, wrapBox) {
+  if (!wrapBox || cs.direction === 'rtl' || !/^(left|start|justify|-webkit-left)$/.test(cs.textAlign) || isNoWrap(cs)) return null;
+  const pos = []; // global char index -> [node, offset]
+  const starts = runs.map((r) => {
+    const at = pos.length;
+    if (r.node) for (let i = 0; i < r.node.data.length; i++) pos.push([r.node, i]);
+    return at;
+  });
+  if (pos.length < 2) return null;
+  let s = 0;
+  while (s < pos.length && /\s/.test(pos[s][0].data[pos[s][1]])) s++;
+  if (s >= pos.length) return null;
+  const rg = S.doc.createRange();
+  const at = (k) => (k < pos.length ? pos[k] : [pos[pos.length - 1][0], pos[pos.length - 1][1] + 1]);
+  const rectsOf = (a, b) => {
+    rg.setStart(at(a)[0], at(a)[1]);
+    rg.setEnd(at(b)[0], at(b)[1]);
+    return [...rg.getClientRects()].filter((q) => q.width > 0.5 && q.height > 0.5);
+  };
+  const lineList = (rects) => {
+    const ls = [];
+    for (const q of rects) {
+      const mid = (q.top + q.bottom) / 2;
+      let l = ls.find((x) => mid > x.t && mid < x.b);
+      if (!l) ls.push(l = { t: q.top, b: q.bottom, l: Infinity, r: -Infinity });
+      l.l = Math.min(l.l, q.left);
+      l.r = Math.max(l.r, q.right);
+    }
+    return ls.sort((p, q) => p.t - q.t);
+  };
+  const all = lineList(rectsOf(s, pos.length));
+  if (all.length < 2 || all[0].l <= wrapBox.x + 1 || all[1].l > wrapBox.x + 1) return null;
+  let lo = s + 1, hi = pos.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (lineList(rectsOf(s, mid)).length > 1) hi = mid; else lo = mid + 1;
+  }
+  let cut = lo - 1;
+  if (cut <= s) return null;
+  if (/[\uDC00-\uDFFF]/.test(pos[cut][0].data[pos[cut][1]])) cut--;
+  const A = [], B = [];
+  runs.forEach((r, i) => {
+    if (!r.node) { (starts[i] <= cut ? A : B).push(r); return; }
+    const a = starts[i], b = a + r.node.data.length;
+    if (b <= cut) A.push(r);
+    else if (a >= cut) B.push(r);
+    else {
+      A.push(Object.assign({}, r, { raw: r.raw.slice(0, cut - a) }));
+      B.push(Object.assign({}, r, { raw: r.raw.slice(cut - a) }));
+    }
+  });
+  const sa = toSegments(A), sb = toSegments(B);
+  if (!sa.length || !sb.length) return null;
+  const lh = parseFloat(cs.lineHeight);
+  const vbox = (rects) => {
+    let top = Infinity, bottom = -Infinity, l = Infinity, r = -Infinity;
+    for (const q of rects) {
+      const hl = Number.isFinite(lh) ? (lh - q.height) / 2 : 0;
+      top = Math.min(top, q.top - hl); bottom = Math.max(bottom, q.bottom + hl);
+      l = Math.min(l, q.left); r = Math.max(r, q.right);
+    }
+    return { top, bottom, l, r };
+  };
+  const ga = vbox(rectsOf(s, cut));
+  const gb = vbox(rectsOf(cut, pos.length));
+  if (!Number.isFinite(ga.top) || !Number.isFinite(gb.top)) return null;
+  return [
+    textNode(sa, { x: ga.l, y: ga.top, w: ga.r - ga.l, h: ga.bottom - ga.top, align: 'LEFT', autoResize: 'WIDTH_AND_HEIGHT' }, cs),
+    textNode(sb, { x: wrapBox.x, y: gb.top, w: wrapBox.w, h: gb.bottom - gb.top, align: ALIGN[cs.textAlign] || 'LEFT', autoResize: 'HEIGHT' }, cs),
+  ];
+}
+
+// letter-spacing compensation for painted inline boxes merged into a paragraph.
+function padExtras(runs, painted) {
+  const extra = { before: new Map(), after: new Map() };
+  const add = (m, i, px) => { if (px > 0.01) m.set(i, (m.get(i) || 0) + px); };
+  for (const e of painted) {
+    const c = css(e);
+    if (c.boxDecorationBreak === 'clone' || c.webkitBoxDecorationBreak === 'clone') continue;
+    const n = (p) => parseFloat(c[p]) || 0;
+    let first = -1, last = -1;
+    runs.forEach((r, i) => { if (r.node && e.contains(r.node)) { if (first < 0) first = i; last = i; } });
+    if (first < 0) continue;
+    add(extra.before, first, n('marginLeft') + n('borderLeftWidth') + n('paddingLeft'));
+    add(extra.after, last, n('paddingRight') + n('borderRightWidth') + n('marginRight'));
+  }
+  return extra;
+}
+
+// The boxes of painted inline elements (code, mark, kbd) inside a merged
+// paragraph, one RECT per line fragment, in page coordinates, drawn behind the text.
+function inlineBoxes(els) {
+  const out = [];
+  for (const e of els) {
+    const c = css(e);
+    const frags = [...e.getClientRects()].filter((q) => q.width > 0.5 && q.height > 0.5);
+    frags.forEach((q, i) => {
+      const fb = { x: q.left, y: q.top, w: q.width, h: q.height };
+      const first = i === 0, last = i === frags.length - 1;
+      const st = borders(c);
+      if (st) {
+        st.weights = Object.assign({}, st.weights);
+        if (!last) st.weights.r = 0;
+        if (!first) st.weights.l = 0;
+      }
+      let rd = radii(c, fb);
+      if (rd) {
+        if (!first) { rd.tl = 0; rd.bl = 0; }
+        if (!last) { rd.tr = 0; rd.br = 0; }
+        if (!(rd.tl || rd.tr || rd.br || rd.bl)) rd = null;
+      }
+      const effects = parseShadows(c.boxShadow);
+      out.push({
+        type: 'RECT', name: e.tagName.toLowerCase() + ' bg', x: r2(q.left), y: r2(q.top), w: r2(q.width), h: r2(q.height),
+        fills: backgroundFills(c, fb), stroke: st, radii: rd, effects: effects.length ? effects : undefined, absolute: true,
+      });
+    });
+  }
+  return out;
+}
+
+function blockText(el, cs, painted) {
+  const runs = gatherRuns(el);
+  const segs = toSegments(runs, null, painted ? padExtras(runs, painted) : null);
   if (!segs.length) return null;
   const cb = contentBox(el, cs);
+  // An inline element that starts mid-line and wraps (its parent isn't one text block).
+  if (cs.display === 'inline' && !painted && !hasPaint(cs)) {
+    const parts = splitFirstLine(runs, cs, blockWrapBox(el));
+    if (parts) return parts;
+  }
   const g = textGeometry(el, cs, cb, cb);
-  return g ? textNode(segs, g) : null;
+  if (!g) return null;
+  const t = textNode(segs, g, cs);
+  clampText(t, cs, cb, false);
+  return t;
 }
 
 function looseText(tn, parent, ox, oy) {
   if (!/\S/.test(tn.data)) return null;
   const pcs = css(parent);
-  const segs = toSegments([{ raw: tn.data, el: parent }]);
+  const runs = [{ raw: tn.data, el: parent, node: tn }];
+  const segs = toSegments(runs);
   if (!segs.length) return null;
-  const g = textGeometry(tn, pcs, null, contentBox(parent, pcs));
+  const pcb = contentBox(parent, pcs);
+  const parts = splitFirstLine(runs, pcs, pcb);
+  if (parts) {
+    parts.forEach((t) => shift(t, ox, oy));
+    return parts;
+  }
+  const g = textGeometry(tn, pcs, null, pcb);
   if (!g) return null;
-  const t = textNode(segs, g);
+  const t = textNode(segs, g, pcs);
+  clampText(t, pcs, pcb, true);
+  delete t.overflowsBox; // the parent frame decides about clipping its children
   shift(t, ox, oy);
   return t;
 }
@@ -926,10 +1383,27 @@ function formNode(el, cs, box, rect, tag) {
   const cb = contentBox(el, cs);
   const x = cb.x - rect.left;
   if (tag === 'TEXTAREA') {
-    f.children.push(textNode(segs, { x, y: cb.y - rect.top, w: cb.w, h: cb.h, align: ALIGN[cs.textAlign] || 'LEFT', autoResize: 'HEIGHT' }));
+    f.children.push(textNode(segs, { x, y: cb.y - rect.top, w: cb.w, h: cb.h, align: ALIGN[cs.textAlign] || 'LEFT', autoResize: 'HEIGHT' }, cs));
   } else {
     const lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 13) * 1.2;
-    f.children.push(textNode(segs, { x, y: cb.y - rect.top + (cb.h - lh) / 2, w: cb.w, h: lh, align: 'LEFT', autoResize: 'WIDTH_AND_HEIGHT' }));
+    const y = cb.y - rect.top + (cb.h - lh) / 2;
+    let align = ALIGN[cs.textAlign] || 'LEFT';
+    if (align === 'JUSTIFIED') align = 'LEFT'; // one line: justify == start
+    if (cs.direction === 'rtl' && cs.textAlign === 'start') align = 'RIGHT';
+    // OTP boxes, steppers, amount fields: keep centered/right text in a fixed box,
+    // but only when it clearly fits (an input never wraps; overflow shows the start).
+    const mctx = (S.measureCtx = S.measureCtx || document.createElement('canvas').getContext('2d'));
+    mctx.font = cs.font || `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const ls = parseFloat(cs.letterSpacing) || 0;
+    const shown = segs.map((sg) => sg.text).join('');
+    const tw = mctx.measureText(shown).width + ls * shown.length;
+    if (align !== 'LEFT' && tw <= cb.w - 1) {
+      const t = textNode(segs, { x, y, w: cb.w, h: lh, align, autoResize: 'HEIGHT' }, cs);
+      t.truncate = 1; // never a second line, even if Figma's metrics come out wider
+      f.children.push(t);
+    } else {
+      f.children.push(textNode(segs, { x, y, w: cb.w, h: lh, align: 'LEFT', autoResize: 'WIDTH_AND_HEIGHT' }, cs));
+    }
   }
   return f;
 }
@@ -1065,17 +1539,30 @@ function markStretch(frame, kids, l) {
 
 // ---------- image loading ----------
 
-async function loadImages(list, onProgress) {
+// Each image gets its own timeout and the whole step a budget: one hung asset
+// must not cost the import. Whatever is left gets slow=true (placeholder in Figma).
+async function loadImages(list, onProgress, budgetMs = 30000) {
   const queue = list.slice();
   let done = 0;
+  const all = new AbortController();
+  const deadline = _setTimeout(() => all.abort(), budgetMs);
   const worker = async () => {
-    while (queue.length) {
+    while (queue.length && !all.signal.aborted) {
       const it = queue.shift();
-      try { it.bytes = await imageBytes(it.url, it.el); } catch (e) { it.bytes = null; }
+      try {
+        const r = await imageBytes(it.url, it.el, all.signal);
+        it.bytes = r.bytes;
+        if (r.slow) it.slow = true;
+      } catch (e) { it.bytes = null; }
       onProgress(++done, list.length);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(6, list.length) }, worker));
+  try {
+    await Promise.all(Array.from({ length: Math.min(6, list.length) }, worker));
+  } finally {
+    _clearTimeout(deadline);
+  }
+  for (const it of queue) it.slow = true;
 }
 
 function sniff(b) {
@@ -1086,12 +1573,27 @@ function sniff(b) {
 }
 
 // Figma accepts PNG/JPEG/GIF up to 4096px; everything else is re-encoded as PNG.
-async function imageBytes(url, el) {
+async function imageBytes(url, el, outer) {
+  const st = { slow: false };
+  const bytes = await imageBytesInner(url, el, outer, (v) => { st.slow = v; });
+  return { bytes, slow: !bytes && st.slow };
+}
+
+async function imageBytesInner(url, el, outer, setSlow) {
   let blob = null;
+  const ac = new AbortController();
+  const t = _setTimeout(() => ac.abort(), 12000); // includes Chrome's cache-lock wait on the <img> request
+  const onOuter = () => ac.abort();
+  if (outer) { if (outer.aborted) ac.abort(); else outer.addEventListener('abort', onOuter, { once: true }); }
   try {
-    const res = await fetch(url);
-    if (res.ok) blob = await res.blob();
-  } catch (e) { /* CORS or offline */ }
+    const res = await (_fetch || fetch)(url, { signal: ac.signal });
+    if (res.ok) blob = await res.blob(); // the body read is covered by the same signal
+  } catch (e) {
+    if (e && e.name === 'AbortError') setSlow(true); // otherwise CORS or offline
+  } finally {
+    _clearTimeout(t);
+    if (outer) outer.removeEventListener('abort', onOuter);
+  }
 
   if (blob) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -1133,14 +1635,276 @@ async function toPng(source, w, h) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 }
+
+// ---------- page preparation ----------
+// Pure string work, shared with dev/runner.html and dev/fidelity.mjs so the
+// harness renders exactly what the plugin renders. No literal closing script
+// tags or HTML comment openers in this script: the harness extracts it by regex.
+
+const TAILWIND_CDN = 'https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4';
+const REACT_CDN = [
+  'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
+  'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
+  'https://unpkg.com/@babel/standalone@7.24.7/babel.min.js',
+];
+const LUCIDE_CDN = 'https://unpkg.com/lucide-react@0.453.0/dist/umd/lucide-react.min.js';
+
+// Returns { html, tailwind, jsx }: the document to put into the stage frame.
+function prepareHtml(src, opts) {
+  let html = src;
+  const jsx = looksLikeJsx(html);
+  if (jsx) html = wrapJsx(html);
+  html = sanitizeForStage(html);
+  const tailwind = !jsx && needsTailwind(html);
+  if (tailwind) html = injectHead(html, `<script src="${TAILWIND_CDN}"><\/script>`);
+  // First thing in <head>, so it runs before any page script and survives a
+  // truncated tail (an unclosed script/style/comment would swallow anything appended).
+  const boot = `try{(${pageEnvShim})()}catch(e){}` + (opts && opts.agent ? `;(${pageAgent})();` : '');
+  html = injectHead(html, `<script>${boot}<\/script>`);
+  return { html, tailwind, jsx };
+}
+
+// The stage frame has an opaque origin: storage and cookies throw there and
+// take the page's own scripts (and whole sections of the page) down with them.
+function pageEnvShim() {
+  function mk() {
+    var m = new Map();
+    var api = {
+      getItem: function (k) { k = String(k); return m.has(k) ? m.get(k) : null; },
+      setItem: function (k, v) { m.set(String(k), String(v)); },
+      removeItem: function (k) { m.delete(String(k)); },
+      clear: function () { m.clear(); },
+      key: function (i) { var a = Array.from(m.keys()); return i < a.length ? a[i] : null; },
+    };
+    return new Proxy(api, {
+      get: function (t, p) { if (p === 'length') return m.size; if (typeof p === 'symbol' || p in api) return api[p]; return m.has(p) ? m.get(p) : undefined; },
+      set: function (t, p, v) { if (!(p in api)) m.set(String(p), String(v)); return true; },
+      deleteProperty: function (t, p) { m.delete(String(p)); return true; },
+      has: function (t, p) { return p in api || m.has(p); },
+      ownKeys: function () { return Array.from(m.keys()); },
+      getOwnPropertyDescriptor: function (t, p) { return m.has(p) ? { value: m.get(p), enumerable: true, configurable: true, writable: true } : undefined; },
+    });
+  }
+  ['localStorage', 'sessionStorage'].forEach(function (n) {
+    try { window[n].getItem('x'); } catch (e) {
+      try { Object.defineProperty(window, n, { value: mk(), configurable: true, writable: true }); } catch (_) {}
+    }
+  });
+  try { void document.cookie; } catch (e) {
+    try {
+      var jar = '';
+      Object.defineProperty(Document.prototype, 'cookie', {
+        configurable: true,
+        get: function () { return jar; },
+        set: function (v) {
+          var kv = String(v).split(';')[0].trim();
+          if (!kv) return;
+          var k = kv.split('=')[0];
+          jar = jar.split('; ').filter(function (c) { return c && c.split('=')[0] !== k; }).concat(kv).join('; ');
+        },
+      });
+    } catch (_) {}
+  }
+  try {
+    var idb = window.indexedDB;
+    idb.open('h2f-probe');
+  } catch (e) {
+    try {
+      Object.defineProperty(window, 'indexedDB', {
+        configurable: true,
+        value: { open: function () { var rq = { result: null, error: new Error('indexedDB unavailable') }; setTimeout(function () { if (rq.onerror) rq.onerror({ target: rq }); }, 0); return rq; }, deleteDatabase: function () { return {}; } },
+      });
+    } catch (_) {}
+  }
+  ['pushState', 'replaceState'].forEach(function (n) {
+    var f = history[n];
+    history[n] = function () { try { return f.apply(history, arguments); } catch (e) {} };
+  });
+}
+
+// Meta CSP would block the agent (and its image fetches); meta refresh would
+// navigate the stage away. <base href> stays: relative assets depend on it.
+function sanitizeForStage(html) {
+  return html
+    .replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*content-security-policy(-report-only)?\b[^>]*>/gi, '')
+    .replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*refresh\b[^>]*>/gi, '')
+    .replace(/(<base\b[^>]*?)\s+target\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '$1');
+}
+
+// A bare snippet full of utility classes but with no styles at all is almost
+// certainly Tailwind markup copied out of a component.
+function needsTailwind(html) {
+  const src = html.replace(/<\!--[\s\S]*?-->/g, '');
+  if (/<style\b|<link\b[^>]*\brel=["']?stylesheet|<script\b[^>]*\bsrc=["']?[^"'>]*tailwind/i.test(src)) return false;
+  return /class(Name)?="[^"]*\b(flex|grid|px-\d|py-\d|text-(xs|sm|lg|xl|\dxl)|bg-[a-z]+-\d{2,3}|rounded(-\w+)?)\b/.test(src);
+}
+
+// Anything placed before <!doctype> would flip the page into quirks mode.
+function injectHead(html, snippet) {
+  for (const re of [/<head\b[^>]*>/i, /<html\b[^>]*>/i, /<!doctype[^>]*>/i]) {
+    const m = re.exec(html);
+    if (m) return html.slice(0, m.index + m[0].length) + snippet + html.slice(m.index + m[0].length);
+  }
+  return snippet + html;
+}
+
+// ---------- JSX / TSX components (v0, Claude artifacts, shadcn) ----------
+
+function stripJsxPreamble(src) {
+  let s = src.trimStart();
+  for (let m; (m = /^(\/\/[^\n]*\n|\/\*[\s\S]*?\*\/|['"]use (client|server)['"];?)\s*/.exec(s));) s = s.slice(m[0].length);
+  return s;
+}
+
+function looksLikeJsx(src) {
+  const s = stripJsxPreamble(src);
+  if (/^<(!doctype|html|head|body|\!--|style|script|link|meta)\b/i.test(s)) return false;
+  if (/^(import|export|const|let|var|function|type|interface)\b/.test(s)) {
+    return /<[A-Za-z>]/.test(s) && /(className=|return\s*\(?\s*<|=>\s*\(?\s*<)/.test(s);
+  }
+  // A bare JSX fragment: <div className=...>{...}</div>
+  return /^</.test(s) && /\bclassName=/.test(s) && !/\sclass=/.test(s);
+}
+
+// Compiles the component in the stage with React + Babel from a CDN. The source
+// is embedded as a JSON string, so nothing inside it can break out of the script.
+function wrapJsx(src) {
+  let code = src;
+  if (/^</.test(stripJsxPreamble(src))) code = `export default function App() { return (<>${src}</>); }`;
+  const json = JSON.stringify(code).replace(/</g, '\\u003c');
+  const libs = REACT_CDN.map((u) => `<script src="${u}"><\/script>`).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`
+    + `<script src="${TAILWIND_CDN}"><\/script>${libs}<script src="${LUCIDE_CDN}"><\/script>`
+    + `</head><body><div id="root"></div><script>(${jsxBoot})(${json});<\/script></body></html>`;
+}
+
+function jsxBoot(SRC) {
+  const fail = (msg) => parent.postMessage({ h2f: true, kind: 'error', message: msg }, '*');
+  if (typeof React === 'undefined' || typeof ReactDOM === 'undefined' || typeof Babel === 'undefined') {
+    fail('Не удалось загрузить React/Babel с CDN, чтобы собрать JSX-компонент (нет сети?)');
+    return;
+  }
+  const h = React.createElement;
+  const cx = function () { return [].slice.call(arguments).flat(Infinity).filter((v) => typeof v === 'string' && v).join(' '); };
+  // shadcn/ui primitives -> plain elements with their default (slate) look.
+  const UI = {
+    Button: ['button', 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium'],
+    Card: ['div', 'rounded-xl border border-slate-200 bg-white text-slate-950 shadow-sm'],
+    CardHeader: ['div', 'flex flex-col space-y-1.5 p-6'],
+    CardTitle: ['h3', 'text-2xl font-semibold leading-none tracking-tight'],
+    CardDescription: ['p', 'text-sm text-slate-500'],
+    CardContent: ['div', 'p-6 pt-0'],
+    CardFooter: ['div', 'flex items-center p-6 pt-0'],
+    Badge: ['span', 'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold'],
+    Input: ['input', 'flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm'],
+    Textarea: ['textarea', 'flex min-h-[80px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm'],
+    Label: ['label', 'text-sm font-medium leading-none'],
+    Separator: ['div', 'shrink-0 bg-slate-200 h-px w-full'],
+    Avatar: ['span', 'relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full'],
+    AvatarImage: ['img', 'aspect-square h-full w-full'],
+    AvatarFallback: ['span', 'flex h-full w-full items-center justify-center rounded-full bg-slate-100'],
+  };
+  const BTN = { default: 'bg-slate-900 text-white', outline: 'border border-slate-200 bg-white text-slate-900', secondary: 'bg-slate-100 text-slate-900', ghost: 'text-slate-900', link: 'text-slate-900 underline underline-offset-4', destructive: 'bg-red-500 text-white' };
+  const BADGE = { default: 'border-transparent bg-slate-900 text-white', secondary: 'border-transparent bg-slate-100 text-slate-900', outline: 'text-slate-950', destructive: 'border-transparent bg-red-500 text-white' };
+  const SIZE = { default: 'h-10 px-4 py-2', sm: 'h-9 px-3', lg: 'h-11 px-8', icon: 'h-10 w-10' };
+  const cache = new Map();
+  const part = (name) => {
+    if (cache.has(name)) return cache.get(name);
+    const spec = UI[name] || ['div', ''];
+    const C = React.forwardRef(function (p, ref) {
+      const rest = Object.assign({}, p);
+      ['asChild', 'variant', 'size', 'className', 'children', 'orientation', 'decorative'].forEach((k) => { delete rest[k]; });
+      let cls = spec[1];
+      if (name === 'Button') cls = cx(cls, BTN[p.variant] || BTN.default, SIZE[p.size] || SIZE.default);
+      if (name === 'Badge') cls = cx(cls, BADGE[p.variant] || BADGE.default);
+      cls = cx(cls, p.className);
+      if (p.asChild && React.isValidElement(p.children)) return React.cloneElement(p.children, { className: cx(cls, p.children.props.className) });
+      rest.ref = ref;
+      rest.className = cls;
+      return /^(input|img)$/.test(spec[0]) ? h(spec[0], rest) : h(spec[0], rest, p.children);
+    });
+    C.displayName = name;
+    cache.set(name, C);
+    return C;
+  };
+  const moduleOf = (get) => new Proxy({}, {
+    get: (t, k) => (k === '__esModule' ? true : typeof k !== 'string' || k === 'then' ? undefined : get(k)),
+  });
+  const icon = (name) => {
+    if (cache.has('icon:' + name)) return cache.get('icon:' + name);
+    const I = function (p) {
+      const s = p.size || 24;
+      return h('svg', { width: s, height: s, viewBox: '0 0 24 24', fill: 'none', stroke: p.color || 'currentColor', strokeWidth: p.strokeWidth || 2, className: p.className, style: p.style }, h('circle', { cx: 12, cy: 12, r: 9 }));
+    };
+    cache.set('icon:' + name, I);
+    return I;
+  };
+  const MOTION_PROPS = ['initial', 'animate', 'exit', 'whileHover', 'whileTap', 'whileInView', 'whileFocus', 'whileDrag', 'transition', 'variants', 'layout', 'layoutId', 'viewport', 'drag', 'dragConstraints', 'onAnimationComplete'];
+  const motionTag = (tag) => {
+    if (cache.has('motion:' + tag)) return cache.get('motion:' + tag);
+    const M = React.forwardRef(function (p, ref) {
+      const rest = Object.assign({}, p);
+      MOTION_PROPS.forEach((k) => { delete rest[k]; });
+      rest.ref = ref;
+      return h(tag, rest);
+    });
+    cache.set('motion:' + tag, M);
+    return M;
+  };
+  const passthrough = (k) => (k === 'default' || /^[A-Z]/.test(k) ? part(k === 'default' ? 'Default' : k) : undefined);
+  function require(name) {
+    if (name === 'react') return React;
+    if (name === 'react-dom' || name === 'react-dom/client') return ReactDOM;
+    if (name === 'lucide-react' || /^lucide-react\//.test(name)) {
+      const L = window.LucideReact || {};
+      return moduleOf((k) => (k in L ? L[k] : /^[A-Z]/.test(k) ? icon(k) : undefined));
+    }
+    if (/^@\/components\/ui\//.test(name)) return moduleOf(passthrough);
+    if (/(^|\/)lib\/utils$/.test(name)) return { __esModule: true, cn: cx };
+    if (name === 'framer-motion' || name === 'motion/react') {
+      return { __esModule: true, motion: new Proxy({}, { get: (t, k) => (typeof k === 'string' ? motionTag(k) : undefined) }), AnimatePresence: (p) => p.children || null };
+    }
+    if (name === 'next/image') return { __esModule: true, default: (p) => { const r = Object.assign({}, p); const fill = r.fill; delete r.fill; delete r.priority; if (fill) r.className = cx('absolute inset-0 h-full w-full object-cover', r.className); return h('img', r); } };
+    if (name === 'next/link') return { __esModule: true, default: (p) => h('a', p) };
+    if (/\.(css|scss)$/.test(name)) return {};
+    return moduleOf(passthrough);
+  }
+  try {
+    const last = [];
+    const re = /(?:^|\n)\s*(?:export\s+)?(?:default\s+)?(?:function\s+|(?:const|let|var)\s+)([A-Z]\w*)/g;
+    for (let m; (m = re.exec(SRC));) last.push(m[1]);
+    let out = Babel.transform(SRC, {
+      filename: 'App.tsx',
+      presets: [['typescript', { isTSX: true, allExtensions: true }], 'react'],
+      plugins: ['transform-modules-commonjs'],
+    }).code;
+    if (last.length) out += `\n;try { module.exports.__h2fLast = ${last[last.length - 1]}; } catch (e) {}`;
+    const module = { exports: {} };
+    new Function('require', 'module', 'exports', 'React', out)(require, module, module.exports, React);
+    const ex = module.exports;
+    let C = typeof ex.default === 'function' || (ex.default && ex.default.$$typeof) ? ex.default : null;
+    if (!C) C = Object.keys(ex).map((k) => ex[k]).filter((v) => typeof v === 'function' && /^[A-Z]/.test(v.name || '')).pop() || ex.__h2fLast;
+    if (!C) throw new Error('не нашёл компонент (нужен export default или функция с заглавной буквы)');
+    class Boundary extends React.Component {
+      constructor(p) { super(p); this.state = { err: null }; }
+      static getDerivedStateFromError(err) { return { err }; }
+      render() {
+        if (!this.state.err) return this.props.children;
+        return h('pre', { style: { color: '#b91c1c', padding: 16, whiteSpace: 'pre-wrap', font: '13px monospace' } }, String(this.state.err && this.state.err.message || this.state.err));
+      }
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    ReactDOM.flushSync(() => root.render(h(Boundary, null, h(C))));
+  } catch (err) {
+    fail('Не удалось собрать React-компонент: ' + String((err && err.message) || err).slice(0, 300));
+  }
+}
 </script>
 <script>
 const $ = (id) => document.getElementById(id);
 const PRESETS = { desktop: [1440, 900], laptop: [1280, 800], tablet: [768, 1024], mobile: [390, 844] };
-const TAILWIND_CDN = 'https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4';
-const AGENT = `<script>(${pageAgent.toString()})();<\/script>`;
-
 let busy = false;
+let lastWarnings = [];
 
 function setStatus(text, kind) {
   const el = $('status');
@@ -1209,6 +1973,9 @@ document.addEventListener('keydown', (e) => {
 
 // Messages from the plugin's main thread (code.js).
 window.addEventListener('message', (e) => {
+  // The stage page runs arbitrary code: never take plugin messages from it.
+  const st = $('stage');
+  if (st && e.source && e.source === st.contentWindow) return;
   const msg = e.data && e.data.pluginMessage;
   if (!msg) return;
   if (msg.type === 'settings' && msg.settings) {
@@ -1223,7 +1990,11 @@ window.addEventListener('message', (e) => {
   } else if (msg.type === 'done') {
     lock(false);
     const extra = msg.failed ? ` (не получилось: ${msg.failed})` : '';
-    setStatus(`Готово: ${msg.count} слоёв${extra}`, 'ok');
+    if (lastWarnings.includes('tailwind')) {
+      setStatus(`Готово: ${msg.count} слоёв${extra} — внимание: Tailwind CDN не загрузился, стили потеряны. Проверь сеть и повтори.`, 'warn');
+    } else {
+      setStatus(`Готово: ${msg.count} слоёв${extra}`, 'ok');
+    }
   } else if (msg.type === 'error') {
     lock(false);
     setStatus('Ошибка: ' + msg.message, 'error');
@@ -1232,7 +2003,7 @@ window.addEventListener('message', (e) => {
 
 async function runImport() {
   if (busy) return;
-  let html = $('html').value.trim();
+  const html = $('html').value.trim();
   if (!html) {
     setStatus('Сначала вставь HTML', 'error');
     return;
@@ -1240,12 +2011,12 @@ async function runImport() {
   const [width, height] = currentSize();
   lock(true);
   try {
-    const withTailwind = needsTailwind(html);
-    if (withTailwind) html = injectHead(html, `<script src="${TAILWIND_CDN}"><\/script>`);
-    setStatus(withTailwind ? 'Рендерю страницу (подключаю Tailwind)…' : 'Рендерю страницу…');
-    const { root, images } = await renderAndExtract(html + AGENT, {
+    const prep = prepareHtml(html, { agent: true });
+    setStatus(prep.jsx ? 'Собираю React-компонент…' : prep.tailwind ? 'Рендерю страницу (подключаю Tailwind)…' : 'Рендерю страницу…');
+    const { root, images, warnings } = await renderAndExtract(prep.html, {
       width, height, autoLayout: $('autolayout').checked, images: $('images').checked,
     });
+    lastWarnings = warnings || [];
     setStatus('Создаю слои в Figma…');
     parent.postMessage({ pluginMessage: { type: 'import', doc: { name: root.name, root, images } } }, '*');
   } catch (err) {
@@ -1255,56 +2026,63 @@ async function runImport() {
   }
 }
 
-// A bare snippet full of utility classes but with no styles at all is almost
-// certainly Tailwind markup copied out of a component.
-function needsTailwind(html) {
-  if (/<style|stylesheet|tailwind/i.test(html)) return false;
-  return /class(Name)?="[^"]*\b(flex|grid|px-\d|py-\d|text-(xs|sm|lg|xl|\dxl)|bg-[a-z]+-\d{2,3}|rounded(-\w+)?)\b/.test(html);
-}
-
-// Anything placed before <!doctype> would flip the page into quirks mode.
-function injectHead(html, snippet) {
-  for (const re of [/<head\b[^>]*>/i, /<html\b[^>]*>/i, /<!doctype[^>]*>/i]) {
-    const m = re.exec(html);
-    if (m) return html.slice(0, m.index + m[0].length) + snippet + html.slice(m.index + m[0].length);
-  }
-  return snippet + html;
-}
-
 // Renders the page in an iframe under the UI (scaled to fit the plugin window,
 // so scroll-triggered effects inside it still fire) and asks the agent for the tree.
-async function renderAndExtract(html, opts) {
+// The frame is sandboxed (scripts only: no access to the UI, no dialogs, no top
+// navigation), always light, and torn down as soon as the agent has answered.
+function renderAndExtract(html, opts) {
   const old = $('stage');
   if (old) old.remove();
   const stage = document.createElement('iframe');
   stage.id = 'stage';
   stage.setAttribute('aria-hidden', 'true');
+  stage.setAttribute('sandbox', 'allow-scripts');
+  stage.style.colorScheme = 'light';
   stage.style.width = opts.width + 'px';
   stage.style.height = opts.height + 'px';
   stage.style.transform = `scale(${Math.min(1, window.innerWidth / opts.width)})`;
   document.body.appendChild(stage);
 
-  await new Promise((resolve) => {
-    const timer = setTimeout(resolve, 20000);
-    stage.onload = () => { clearTimeout(timer); resolve(); };
-    stage.srcdoc = html;
-  });
-
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => done(new Error('страница не ответила за 90 секунд')), 90000);
+    let ready = false, acked = false, asked = false, finished = false;
+    let idle = 0, ackTimer = 0;
+    const loadTimer = setTimeout(() => ask(), 30000);
+    const hardCap = setTimeout(() => done(new Error('страница не ответила за 3 минуты')), 180000);
+    // Inactivity watchdog: long pages that keep reporting progress are fine.
+    const bump = () => { clearTimeout(idle); idle = setTimeout(() => done(new Error('страница перестала отвечать')), 60000); };
     function done(err, value) {
-      clearTimeout(timer);
+      if (finished) return;
+      finished = true;
+      [idle, ackTimer, loadTimer, hardCap].forEach(clearTimeout);
       window.removeEventListener('message', onMessage);
+      // Stop the page's timers, media and scripts; deferred so we're not inside its message dispatch.
+      setTimeout(() => { if (stage.isConnected) stage.remove(); }, 0);
       if (err) reject(err); else resolve(value);
+    }
+    function ask() {
+      if (asked || finished) return;
+      asked = true;
+      bump();
+      try { stage.contentWindow.postMessage({ h2f: 'extract', opts }, '*'); } catch (e) {}
+      ackTimer = setTimeout(() => {
+        if (acked) return;
+        done(new Error(ready
+          ? 'страница не отвечает (зависший скрипт?)'
+          : 'не удалось запустить разбор страницы: HTML, похоже, обрезан до <head> или содержит незакрытый <script>/<style>/комментарий'));
+      }, 8000);
     }
     function onMessage(e) {
       if (e.source !== stage.contentWindow || !e.data || e.data.h2f !== true) return;
-      if (e.data.kind === 'progress') setStatus(e.data.text);
-      else if (e.data.kind === 'error') done(new Error(e.data.message));
-      else if (e.data.kind === 'result') done(null, e.data);
+      const k = e.data.kind;
+      if (k === 'ready') ready = true;
+      else if (k === 'ack') { acked = true; bump(); }
+      else if (k === 'progress') { bump(); setStatus(e.data.text); }
+      else if (k === 'error') done(new Error(e.data.message));
+      else if (k === 'result') done(null, e.data);
     }
     window.addEventListener('message', onMessage);
-    stage.contentWindow.postMessage({ h2f: 'extract', opts }, '*');
+    stage.onload = () => { clearTimeout(loadTimer); ask(); };
+    stage.srcdoc = html;
   });
 }
 </script>

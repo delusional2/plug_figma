@@ -13,29 +13,37 @@
   const opts = { width, height, autoLayout: q.get('al') !== '0', images: q.get('img') !== '0' };
   try {
     const ui = await (await fetch('../ui.html')).text();
-    const agentSrc = /<script>\n([\s\S]*?)<\/script>/.exec(ui)[1];
-    const tailwindCdn = /const TAILWIND_CDN = '([^']+)'/.exec(ui)[1];
-    let html = await (await fetch(q.get('case'))).text();
-    // Same Tailwind auto-detection as the UI.
-    const needsTw = !/<style|stylesheet|tailwind/i.test(html) &&
-      /class(Name)?="[^"]*\b(flex|grid|px-\d|py-\d|text-(xs|sm|lg|xl|\dxl)|bg-[a-z]+-\d{2,3}|rounded(-\w+)?)\b/.test(html);
-    if (needsTw) html = `<script src="${tailwindCdn}"><\/script>\n` + html;
+    // The plugin's first <script>: the page agent plus prepareHtml() and friends.
+    const firstScript = /<script>\n([\s\S]*?)<\/script>/.exec(ui)[1];
+    const { prepareHtml } = new Function(firstScript + '\n;return { prepareHtml };')();
+    const html = prepareHtml(await (await fetch(q.get('case'))).text(), { agent: true }).html;
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
+    frame.style.colorScheme = 'light';
     frame.style.width = width + 'px';
     frame.style.height = height + 'px';
     document.body.appendChild(frame);
-    await new Promise((r) => { frame.onload = r; frame.srcdoc = html + `<script>${agentSrc}\n;pageAgent();<\/script>`; });
+    // Same handshake as ui.html renderAndExtract(): listen first, ask on load, expect an ack.
     const result = await new Promise((resolve, reject) => {
+      let acked = false;
       addEventListener('message', (e) => {
         if (e.source !== frame.contentWindow || !e.data || e.data.h2f !== true) return;
+        if (e.data.kind === 'ack') acked = true;
         if (e.data.kind === 'result') resolve(e.data);
         if (e.data.kind === 'error') reject(new Error(e.data.message));
       });
-      frame.contentWindow.postMessage({ h2f: 'extract', opts }, '*');
+      const ask = () => {
+        frame.contentWindow.postMessage({ h2f: 'extract', opts }, '*');
+        setTimeout(() => { if (!acked) reject(new Error('agent did not start (no ack)')); }, 8000);
+      };
+      let asked = false;
+      const once = () => { if (!asked) { asked = true; ask(); } };
+      setTimeout(once, 30000);
+      frame.onload = once;
+      frame.srcdoc = html;
     });
     const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
-    window.__result = JSON.stringify({ name: result.root.name, root: result.root, images: result.images.map((im) => ({ ref: im.ref, url: im.url, bytes: im.bytes ? b64(im.bytes) : null })) });
+    window.__result = JSON.stringify({ name: result.root.name, root: result.root, images: result.images.map((im) => ({ ref: im.ref, url: im.url, bytes: im.bytes ? b64(im.bytes) : null, slow: im.slow })), warnings: result.warnings });
   } catch (err) {
     window.__result = JSON.stringify({ error: String(err && err.stack || err) });
   }

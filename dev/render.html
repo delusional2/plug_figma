@@ -105,7 +105,7 @@ function build(n, parent, images) {
   if (n.type === 'TEXT') {
     el.style.whiteSpace = n.autoResize === 'WIDTH_AND_HEIGHT' ? 'pre' : 'pre-wrap';
     el.style.overflowWrap = 'break-word';
-    if (n.autoResize !== 'WIDTH_AND_HEIGHT') {
+    if (n.autoResize !== 'WIDTH_AND_HEIGHT' || n.truncate) {
       const horizontalParent = inLayout && parent.layout.mode === 'HORIZONTAL';
       if (!(n.stretch && inLayout && parent.layout.mode === 'VERTICAL')) el.style.width = n.w + 'px';
       if (n.stretch && horizontalParent) el.style.height = 'auto';
@@ -129,6 +129,21 @@ function build(n, parent, images) {
         span.style.color = 'transparent';
       } else span.style.color = cssPaint(s.fill);
       el.appendChild(span);
+    }
+    // Figma textTruncation ENDING + maxLines.
+    if (n.truncate === 1) {
+      el.style.whiteSpace = 'nowrap';
+      el.style.overflow = 'hidden';
+      el.style.textOverflow = 'ellipsis';
+    } else if (n.truncate > 1) {
+      el.style.display = '-webkit-box';
+      el.style.webkitBoxOrient = 'vertical';
+      el.style.webkitLineClamp = String(n.truncate);
+      el.style.overflow = 'hidden';
+    }
+    if (n.effects && n.effects.length) {
+      el.style.textShadow = n.effects.filter((e) => e.type === 'DROP_SHADOW')
+        .map((e) => `${e.offset.x}px ${e.offset.y}px ${e.radius}px ${rgba(e.color)}`).join(', ');
     }
     // A block-level line box: the strut uses the first segment's metrics, like Figma.
     const s0 = n.segments[0];

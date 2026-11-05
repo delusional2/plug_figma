@@ -77,6 +77,8 @@ class Text extends Node {
   setRangeTextCase(a, b, v) { this._range(a, b); oneOf(v, ['ORIGINAL', 'UPPER', 'LOWER', 'TITLE'], 'textCase'); }
   set textAutoResize(v) { oneOf(v, ['NONE', 'WIDTH_AND_HEIGHT', 'HEIGHT', 'TRUNCATE'], 'textAutoResize'); this._ar = v; }
   set textAlignHorizontal(v) { oneOf(v, ['LEFT', 'CENTER', 'RIGHT', 'JUSTIFIED'], 'align'); }
+  set textTruncation(v) { oneOf(v, ['DISABLED', 'ENDING'], 'textTruncation'); this._tt = v; } get textTruncation() { return this._tt || 'DISABLED'; }
+  set maxLines(v) { if (v !== null && !(Number.isInteger(v) && v >= 1)) fail('maxLines: bad value ' + v); if (v !== null && this._tt !== 'ENDING') fail('maxLines without textTruncation ENDING'); this._ml = v; } get maxLines() { return this._ml == null ? null : this._ml; }
 }
 const page = new Node('PAGE');
 page.selection = [];
@@ -103,7 +105,7 @@ const figma = {
 };
 const doc = JSON.parse(fs.readFileSync(docPath, 'utf8'));
 for (const im of doc.images || []) { if (Array.isArray(im.bytes)) im.bytes = Uint8Array.from(im.bytes); else if (typeof im.bytes === 'string') im.bytes = new Uint8Array(Buffer.from(im.bytes, 'base64')); }
-vm.runInNewContext(fs.readFileSync(codePath, 'utf8'), { figma, __html__: '', console, Object, Array, Math, Map, Set, Promise, String, JSON, Infinity });
+vm.runInNewContext(fs.readFileSync(codePath, 'utf8'), { figma, __html__: '', console, Object, Array, Math, Map, Set, Promise, String, JSON, Infinity, setTimeout, clearTimeout });
 (async () => {
   await figma.ui.onmessage({ type: 'import', doc });
   const count = (n) => 1 + (n.children || []).reduce((a, c) => a + count(c), 0);

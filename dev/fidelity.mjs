@@ -74,7 +74,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Every tab a case opens is registered in its `tabs` set, so a timed-out case can be torn down.
 async function newPage(w, h, tabs) {
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+  // Own window per tab: parallel background tabs don't paint reliably (tiled screenshots).
+  const { targetId } = await send('Target.createTarget', { url: 'about:blank', newWindow: true, background: false });
   if (tabs) tabs.add(targetId);
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
   const s = (m, p) => send(m, p, sessionId);
@@ -115,14 +116,13 @@ async function waitFor(page, expr, ms = 150000, alive = () => true) {
 }
 
 // ---------- per case ----------
+// The plugin's first <script> is plain string work at top level (functions only), so it evaluates in node.
+const { prepareHtml } = new Function(/<script>\n([\s\S]*?)<\/script>/.exec(fs.readFileSync(path.join(ROOT, 'ui.html'), 'utf8'))[1] + '\n;return { prepareHtml };')();
+
 async function original(caseFile, tabs) {
   const p = await newPage(width, height, tabs);
-  let html = fs.readFileSync(path.join(ROOT, 'dev', 'cases', caseFile), 'utf8');
-  // Serve through runner-equivalent Tailwind detection so both sides see the same CSS.
-  const ui = fs.readFileSync(path.join(ROOT, 'ui.html'), 'utf8');
-  const cdn = /const TAILWIND_CDN = '([^']+)'/.exec(ui)[1];
-  const needsTw = !/<style|stylesheet|tailwind/i.test(html) && /class(Name)?="[^"]*\b(flex|grid|px-\d|py-\d|text-(xs|sm|lg|xl|\dxl)|bg-[a-z]+-\d{2,3}|rounded(-\w+)?)\b/.test(html);
-  if (needsTw) html = `<script src="${cdn}"></script>\n` + html;
+  // Same preparation as the plugin (JSX build, CSP strip, Tailwind injection, env shim), minus the agent.
+  const html = prepareHtml(fs.readFileSync(path.join(ROOT, 'dev', 'cases', caseFile), 'utf8'), { agent: false }).html;
   const tmpName = `_orig_${width}_${caseFile}`;
   const tmp = path.join(OUT, tmpName);
   fs.writeFileSync(tmp, html);
