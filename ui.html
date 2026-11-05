@@ -888,18 +888,41 @@ function childrenOf(el, ox, oy) {
 // Returns the layers for one element (0, 1 or several when a wrapper is lifted),
 // positioned relative to (ox, oy) — the parent layer's top-left in page coordinates.
 function walk(el, ox, oy) {
-  let out = walkEl(el, ox, oy);
-  if (out.length && el.nodeType === 1) {
-    try { applyFilter(el, out); } catch (e) {}
-    let masked = false;
-    try {
-      const w = clipMask(el, out, ox, oy);
-      if (w) { out = [w]; masked = true; }
-    } catch (e) {}
-    try {
-      const o = !masked && outlineNode(el, ox, oy);
-      if (o) out.push(o);
-    } catch (e) {}
+  // A CSS transform: measure the element and its subtree untransformed (local space),
+  // then place the result with a Figma transform.
+  let t = null;
+  if (el.nodeType === 1 && el.tagName.toLowerCase() !== 'svg') {
+    try { t = xform(el, css(el)); } catch (e) { t = null; }
+  }
+  let saved = null;
+  if (t) {
+    saved = el.getAttribute('style');
+    for (const p of ['transition', 'animation', 'transform', 'rotate', 'scale', 'translate']) el.style.setProperty(p, 'none', 'important');
+    el.style.setProperty('will-change', 'transform', 'important'); // keeps it the containing block of fixed descendants
+  }
+  let out;
+  try {
+    out = walkEl(el, ox, oy);
+    if (out.length && el.nodeType === 1) {
+      try { applyFilter(el, out); } catch (e) {}
+      let masked = false;
+      try {
+        const w = clipMask(el, out, ox, oy);
+        if (w) { out = [w]; masked = true; }
+      } catch (e) {}
+      try {
+        const o = !masked && outlineNode(el, ox, oy);
+        if (o) out.push(o);
+      } catch (e) {}
+      if (t) {
+        try { out = placeTransformed(el, out, t, ox, oy); } catch (e) { console.warn('html-to-figma: transform not applied', e); }
+      }
+    }
+  } finally {
+    if (t) {
+      if (saved == null) el.removeAttribute('style');
+      else el.setAttribute('style', saved);
+    }
   }
   // Paint layer of what this element produced, for the parent's ordering (paintOrder).
   if (out.length && el.nodeType === 1) {
@@ -908,7 +931,7 @@ function walk(el, ox, oy) {
     const zSet = cs.zIndex !== 'auto';
     const flexItem = zSet && el.parentElement && /flex|grid/.test(css(el.parentElement).display);
     // opacity, transforms, filters… paint with the positioned layer even when static.
-    const layer = pos || flexItem || parseFloat(cs.opacity) < 1 || cs.transform !== 'none' || cs.filter !== 'none'
+    const layer = pos || flexItem || parseFloat(cs.opacity) < 1 || cs.transform !== 'none' || cs.filter !== 'none' || !!t
       || cs.isolation === 'isolate' || (cs.mixBlendMode && cs.mixBlendMode !== 'normal') || (cs.clipPath && cs.clipPath !== 'none');
     if (layer) {
       const z = zSet ? parseInt(cs.zIndex, 10) || 0 : 0;
@@ -916,6 +939,103 @@ function walk(el, ox, oy) {
     }
   }
   return out;
+}
+
+// The element's 2D transform (translate, rotate, scale properties, then transform) about
+// its transform-origin, or null for none / a pure translation / real 3D.
+function xform(el, cs) {
+  const has = (v) => v && v !== 'none';
+  if (!has(cs.transform) && !has(cs.rotate) && !has(cs.scale) && !has(cs.translate)) return null;
+  const bw = el.offsetWidth || 0, bh = el.offsetHeight || 0;
+  let m = new DOMMatrix();
+  if (has(cs.translate)) {
+    const t = cs.translate.trim().split(/\s+/);
+    m = m.translate(resolveLen(t[0], bw), t[1] ? resolveLen(t[1], bh) : 0);
+  }
+  if (has(cs.rotate)) {
+    const t = cs.rotate.trim().split(/\s+/);
+    const ang = toRadians(t[t.length - 1]) * 180 / Math.PI;
+    if (t.length === 1 || (t.length === 2 && t[0] === 'z')) m = m.rotate(ang);
+    else if (t.length === 4 && +t[0] === 0 && +t[1] === 0 && +t[2] !== 0) m = m.rotate(+t[2] > 0 ? ang : -ang);
+    else return null;
+  }
+  if (has(cs.scale)) {
+    const t = cs.scale.trim().split(/\s+/).map((v) => (/%$/.test(v) ? parseFloat(v) / 100 : parseFloat(v)));
+    m = m.scale(t[0], t.length > 1 ? t[1] : t[0]);
+  }
+  if (has(cs.transform)) m = m.multiply(new DOMMatrix(cs.transform));
+  if (!m.is2D) {
+    // translateZ(0) / translate3d hacks are 2D in effect; perspective and 3D rotations are not.
+    const flat = [m.m13, m.m14, m.m23, m.m24, m.m31, m.m32, m.m34].every((v) => Math.abs(v) < 1e-6) && Math.abs(m.m33 - 1) < 1e-6 && Math.abs(m.m44 - 1) < 1e-6;
+    if (!flat) return null;
+  }
+  const { a, b, c, d, e, f } = m;
+  if (![a, b, c, d, e, f].every(Number.isFinite)) return null;
+  if (Math.abs(a - 1) < 1e-4 && Math.abs(b) < 1e-4 && Math.abs(c) < 1e-4 && Math.abs(d - 1) < 1e-4) return null;
+  const o = (cs.transformOrigin || '').split(/\s+/).map(parseFloat);
+  return { a, b, c, d, e, f, ox: o[0] || 0, oy: o[1] || 0 };
+}
+
+// Scale a produced layer tree (CSS scale as real sizes, so text and strokes stay editable).
+function scaleTree(n, sx, sy, top) {
+  const k = Math.sqrt(sx * sy);
+  if (!top) { n.x = r2(n.x * sx); n.y = r2(n.y * sy); }
+  n.w = r2(n.w * sx);
+  n.h = r2(n.h * sy);
+  if (n.radii) {
+    const r = {};
+    for (const q of ['tl', 'tr', 'br', 'bl']) r[q] = r2(n.radii[q] * k);
+    if (n.radii.ellipse) { r.ellipse = {}; for (const q of ['tl', 'tr', 'br', 'bl']) r.ellipse[q] = [r2(n.radii.ellipse[q][0] * sx), r2(n.radii.ellipse[q][1] * sy)]; }
+    n.radii = r;
+  }
+  const sw = (st) => st && Object.assign({}, st, {
+    weights: { t: r2(st.weights.t * sy), r: r2(st.weights.r * sx), b: r2(st.weights.b * sy), l: r2(st.weights.l * sx) },
+    dash: st.dash && st.dash.map((v) => r2(v * k)), extra: st.extra && st.extra.map(sw),
+  });
+  if (n.stroke) n.stroke = sw(n.stroke);
+  if (n.effects) n.effects = n.effects.map((e) => Object.assign({}, e, e.offset ? { offset: { x: r2(e.offset.x * sx), y: r2(e.offset.y * sy) } } : {}, { radius: r2((e.radius || 0) * k) }, e.spread != null ? { spread: r2(e.spread * k) } : {}));
+  if (n.layout) {
+    const l = n.layout;
+    Object.assign(l, { pt: r2(l.pt * sy), pb: r2(l.pb * sy), pl: r2(l.pl * sx), pr: r2(l.pr * sx), spacing: r2(l.spacing * (l.mode === 'HORIZONTAL' ? sx : sy)) });
+  }
+  if (n.segments) n.segments = n.segments.map((sg) => Object.assign({}, sg, { size: r2(sg.size * k), lineHeight: sg.lineHeight ? r2(sg.lineHeight * k) : sg.lineHeight, letterSpacing: sg.letterSpacing ? r2(sg.letterSpacing * k) : sg.letterSpacing }));
+  if (n.d) { let i = 0; n.d = n.d.replace(/-?[\d.]+(?:e-?\d+)?/g, (v) => String(r2(+v * (i++ % 2 ? sy : sx)))); }
+  if (n.svg) n.svg = n.svg.replace(/^<svg\b[^>]*>/, (tag) => tag.replace(/\swidth="[^"]*"/, ` width="${n.w}"`).replace(/\sheight="[^"]*"/, ` height="${n.h}"`));
+  if (n.xf) { n.xf.tx = r2(n.xf.tx * sx); n.xf.ty = r2(n.xf.ty * sy); }
+  for (const c of n.children || []) scaleTree(c, sx, sy, false);
+}
+
+function placeTransformed(el, out, t, ox, oy) {
+  const r = el.getBoundingClientRect(); // untransformed while neutralized
+  const L = { x: r2(r.left - ox), y: r2(r.top - oy), w: r2(r.width), h: r2(r.height) };
+  const near = (n) => Math.abs(n.x - L.x) < 1 && Math.abs(n.y - L.y) < 1 && Math.abs(n.w - L.w) < 1 && Math.abs(n.h - L.h) < 1;
+  let unit;
+  if (out.length === 1 && near(out[0])) unit = out[0];
+  else {
+    const abs = out.some((n) => n.absolute);
+    unit = { type: 'FRAME', name: nameFor(el), x: L.x, y: L.y, w: L.w, h: L.h, fills: [], clip: false, absolute: abs,
+      children: out.map((n) => { shift(n, L.x, L.y); delete n.absolute; return n; }) };
+  }
+  const sx = Math.hypot(t.a, t.b), sy = Math.hypot(t.c, t.d);
+  if (sx < 1e-3 || sy < 1e-3) return []; // scale(0): nothing painted
+  if (Math.abs(sx - 1) > 0.01 || Math.abs(sy - 1) > 0.01) scaleTree(unit, sx, sy, true);
+  const N = { a: t.a / sx, b: t.b / sx, c: t.c / sy, d: t.d / sy };
+  // Where the box's top-left corner lands, in the parent's space.
+  const Tx = L.x + t.ox - t.a * t.ox - t.c * t.oy + t.e;
+  const Ty = L.y + t.oy - t.b * t.ox - t.d * t.oy + t.f;
+  const ident = Math.abs(N.a - 1) < 1e-3 && Math.abs(N.b) < 1e-3 && Math.abs(N.c) < 1e-3 && Math.abs(N.d - 1) < 1e-3;
+  const put = (n, x, y) => {
+    n.x = r2(x);
+    n.y = r2(y);
+    if (!ident) n.xf = { a: N.a, b: N.b, c: N.c, d: N.d, tx: r2(x), ty: r2(y) };
+  };
+  if (unit.absolute) {
+    put(unit, Tx, Ty);
+    return [unit];
+  }
+  // In flow: CSS lays out the untransformed box, so a plain frame holds that place.
+  put(unit, Tx - L.x, Ty - L.y);
+  return [{ type: 'FRAME', name: 'transform', x: L.x, y: L.y, w: L.w, h: L.h, fills: [], clip: false, children: [unit] }];
 }
 
 // CSS filter functions. Color ones are baked into every color of the subtree (and into

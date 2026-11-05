@@ -45,6 +45,14 @@ class Node {
   set strokes(v) { v.forEach(checkPaint); this._strokes = v; } get strokes() { return this._strokes; }
   set effects(v) { v.forEach(checkEffect); this._effects = v; } get effects() { return this._effects; }
   set layoutAlign(v) { oneOf(v, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'INHERIT'], 'layoutAlign'); if (!this.parent || this.parent.layoutMode === 'NONE') fail('layoutAlign outside AL'); this._la = v; } get layoutAlign() { return this._la; }
+  set relativeTransform(m) {
+    if (!Array.isArray(m) || m.length !== 2 || m.some((r) => !Array.isArray(r) || r.length !== 3)) fail('relativeTransform shape');
+    m.flat().forEach((v) => num(v, 'relativeTransform'));
+    if (Math.abs(m[0][0] * m[1][1] - m[0][1] * m[1][0]) < 1e-6) fail('relativeTransform singular');
+    if (this.parent && this.parent.layoutMode && this.parent.layoutMode !== 'NONE' && this._lp !== 'ABSOLUTE') fail('relativeTransform on an auto-layout child');
+    this._rt = m; this._x = m[0][2]; this._y = m[1][2];
+  }
+  get relativeTransform() { return this._rt || [[1, 0, this._x], [0, 1, this._y]]; }
   set isMask(v) { if (typeof v !== 'boolean') fail('isMask'); if (!this.parent) fail('isMask before append'); this._mask = v; } get isMask() { return !!this._mask; }
   set maskType(v) { oneOf(v, ['ALPHA', 'VECTOR', 'LUMINANCE'], 'maskType'); if (!this._mask) fail('maskType without isMask'); }
   set constraints(v) { keysOnly(v, ['horizontal', 'vertical'], 'constraints'); oneOf(v.horizontal, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.horizontal'); oneOf(v.vertical, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.vertical'); this._cons = v; } get constraints() { return this._cons; }

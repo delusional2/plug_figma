@@ -71,6 +71,7 @@ function buildNode(n, parent, ctx) {
     shapeNode(node, n, ctx);
     if (n.layout) applyLayout(node, n);
     place(node, n, parent);
+    if (n.xf) applyTransform(node, n.xf);
     if (n.isMask) {
       node.isMask = true;
       try { node.maskType = n.maskType || 'ALPHA'; } catch (e) { /* older API: alpha masks only */ }
@@ -155,6 +156,19 @@ function place(node, n, parent) {
   }
   if (n.cons && (n.absolute || !auto)) {
     try { node.constraints = { horizontal: n.cons.h, vertical: n.cons.v }; } catch (e) {}
+  }
+}
+
+// CSS transform (scale already baked into sizes): rotation, flips and skew.
+function applyTransform(node, xf) {
+  try {
+    node.relativeTransform = [[xf.a, xf.c, xf.tx], [xf.b, xf.d, xf.ty]];
+  } catch (e) {
+    // Skew (non-orthogonal matrix) rejected: keep the rotation only.
+    try {
+      const r = Math.atan2(xf.b, xf.a);
+      node.relativeTransform = [[Math.cos(r), -Math.sin(r), xf.tx], [Math.sin(r), Math.cos(r), xf.ty]];
+    } catch (e2) {}
   }
 }
 
