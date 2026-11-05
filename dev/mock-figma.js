@@ -45,6 +45,8 @@ class Node {
   set strokes(v) { v.forEach(checkPaint); this._strokes = v; } get strokes() { return this._strokes; }
   set effects(v) { v.forEach(checkEffect); this._effects = v; } get effects() { return this._effects; }
   set layoutAlign(v) { oneOf(v, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'INHERIT'], 'layoutAlign'); if (!this.parent || this.parent.layoutMode === 'NONE') fail('layoutAlign outside AL'); this._la = v; } get layoutAlign() { return this._la; }
+  set isMask(v) { if (typeof v !== 'boolean') fail('isMask'); if (!this.parent) fail('isMask before append'); this._mask = v; } get isMask() { return !!this._mask; }
+  set maskType(v) { oneOf(v, ['ALPHA', 'VECTOR', 'LUMINANCE'], 'maskType'); if (!this._mask) fail('maskType without isMask'); }
   set constraints(v) { keysOnly(v, ['horizontal', 'vertical'], 'constraints'); oneOf(v.horizontal, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.horizontal'); oneOf(v.vertical, ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'], 'constraints.vertical'); this._cons = v; } get constraints() { return this._cons; }
   set layoutPositioning(v) { oneOf(v, ['AUTO', 'ABSOLUTE'], 'layoutPositioning'); if (v === 'ABSOLUTE' && (!this.parent || !this.parent.layoutMode || this.parent.layoutMode === 'NONE')) fail('ABSOLUTE outside AL'); this._lp = v; } get layoutPositioning() { return this._lp; }
 }

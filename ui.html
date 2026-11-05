@@ -887,11 +887,16 @@ function childrenOf(el, ox, oy) {
 // Returns the layers for one element (0, 1 or several when a wrapper is lifted),
 // positioned relative to (ox, oy) — the parent layer's top-left in page coordinates.
 function walk(el, ox, oy) {
-  const out = walkEl(el, ox, oy);
+  let out = walkEl(el, ox, oy);
   if (out.length && el.nodeType === 1) {
     try { applyFilter(el, out); } catch (e) {}
+    let masked = false;
     try {
-      const o = outlineNode(el, ox, oy);
+      const w = clipMask(el, out, ox, oy);
+      if (w) { out = [w]; masked = true; }
+    } catch (e) {}
+    try {
+      const o = !masked && outlineNode(el, ox, oy);
       if (o) out.push(o);
     } catch (e) {}
   }
@@ -994,6 +999,108 @@ function recolor(n, f) {
     });
   }
   for (const k of n.children || []) recolor(k, f);
+}
+
+// clip-path and mask-image: a wrapper at the element's box holding Figma masks
+// (a shape for clip-path, an alpha layer for mask-image) under the element's layers.
+function clipMask(el, out, ox, oy) {
+  const cs = css(el);
+  const cp = cs.clipPath && cs.clipPath !== 'none' ? cs.clipPath : null;
+  const mi = [cs.maskImage, cs.webkitMaskImage].find((v) => v && v !== 'none') || null;
+  if (!cp && !mi) return null;
+  const rect = el.getBoundingClientRect();
+  const W = rect.width, H = rect.height;
+  if (!(W > 0 && H > 0)) return null;
+  const masks = [];
+  if (cp) {
+    const m = clipShape(cp, W, H);
+    if (m) masks.push(Object.assign(m, { name: 'clip-path', isMask: true, maskType: 'VECTOR', fills: [solid({ r: 0, g: 0, b: 0, a: 1 })] }));
+  }
+  if (mi) {
+    const layer = splitTop(mi)[0].trim();
+    const url = /^url\(\s*["']?(.*?)["']?\s*\)$/.exec(layer);
+    let paint = null;
+    if (url && S.opts.images) {
+      const ms = cs.maskSize || cs.webkitMaskSize || '';
+      paint = { type: 'IMAGE', ref: imageRef(url[1], null, null, W, H), scaleMode: /contain/.test(ms) ? 'FIT' : 'FILL' };
+    } else if (/gradient\(/.test(layer) && !/conic/.test(layer)) {
+      const g = gradientPaint(layer, W, H);
+      if (g) paint = Object.assign(g, { gradientStops: g.gradientStops.map((st) => ({ position: st.position, color: { r: 0, g: 0, b: 0, a: st.color.a } })) });
+    }
+    if (paint) masks.push({ type: 'RECT', name: 'mask', x: 0, y: 0, w: r2(W), h: r2(H), fills: [paint], isMask: true, maskType: 'ALPHA' });
+  }
+  if (!masks.length) return null;
+  const x = r2(rect.left - ox), y = r2(rect.top - oy);
+  const kids = out.map((n) => {
+    shift(n, x, y);
+    const abs = n.absolute;
+    delete n.absolute;
+    return abs;
+  });
+  return { type: 'FRAME', name: (out.length === 1 && out[0].name ? out[0].name : nameFor(el)) + ' · clip', x, y, w: r2(W), h: r2(H), fills: [], clip: false, absolute: !!kids[0], children: masks.concat(out) };
+}
+
+function clipShape(cp, W, H) {
+  const fn = /^([a-z]+)\(([\s\S]*)\)/.exec(cp.trim());
+  if (!fn) return null;
+  const args = fn[2].trim();
+  const atSplit = (str) => { const i = str.search(/(^|\s)at\s/); return i < 0 ? [str, ''] : [str.slice(0, i), str.slice(i).replace(/^\s*at\s+/, '')]; };
+  const center = (pos) => {
+    let t = splitSpaces(pos || '');
+    if (/^(top|bottom)$/.test(t[0]) || /^(left|right)$/.test(t[1] || '')) t = [t[1] || 'center', t[0]];
+    return [resolveLen(t[0] || 'center', W), resolveLen(t[1] || 'center', H)];
+  };
+  if (fn[1] === 'polygon' || fn[1] === 'path') {
+    let pts = [], rule = 'NONZERO';
+    if (fn[1] === 'polygon') {
+      const parts = splitTop(args);
+      if (/^\s*(evenodd|nonzero)\s*$/.test(parts[0])) { if (/evenodd/.test(parts.shift())) rule = 'EVENODD'; }
+      pts = parts.map((pp) => { const t = splitSpaces(pp); return [resolveLen(t[0], W), resolveLen(t[1], H)]; });
+    } else {
+      const m = /^(?:(evenodd|nonzero)\s*,\s*)?["']([\s\S]*)["']$/.exec(args);
+      if (!m) return null;
+      if (m[1] === 'evenodd') rule = 'EVENODD';
+      const pe = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      pe.setAttribute('d', m[2]);
+      const len = pe.getTotalLength();
+      const N = Math.min(400, Math.max(24, Math.ceil(len / 3)));
+      for (let i = 0; i < N; i++) { const q = pe.getPointAtLength(len * i / N); pts.push([q.x, q.y]); }
+    }
+    pts = pts.filter((q) => Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    if (pts.length < 3) return null;
+    const x0 = Math.min(...pts.map((q) => q[0])), y0 = Math.min(...pts.map((q) => q[1]));
+    const x1 = Math.max(...pts.map((q) => q[0])), y1 = Math.max(...pts.map((q) => q[1]));
+    if (!(x1 - x0 > 0.01 && y1 - y0 > 0.01)) return null;
+    const d = 'M ' + pts.map((q) => `${r2(q[0] - x0)} ${r2(q[1] - y0)}`).join(' L ') + ' Z';
+    return { type: 'VECTOR', d, rule, x: r2(x0), y: r2(y0), w: r2(x1 - x0), h: r2(y1 - y0) };
+  }
+  if (fn[1] === 'circle' || fn[1] === 'ellipse') {
+    const [sz, pos] = atSplit(args);
+    const [cx, cy] = center(pos);
+    const t = splitSpaces(sz);
+    const side = (k, a, b) => (k === 'farthest-side' ? Math.max(a, b) : Math.min(a, b));
+    let rx, ry;
+    if (fn[1] === 'circle') {
+      const k = t[0] || 'closest-side';
+      rx = ry = /side$/.test(k) ? side(k, side(k, cx, W - cx), side(k, cy, H - cy)) : resolveLen(k, Math.hypot(W, H) / Math.SQRT2);
+    } else {
+      const kx = t[0] || 'closest-side', ky = t[1] || 'closest-side';
+      rx = /side$/.test(kx) ? side(kx, cx, W - cx) : resolveLen(kx, W);
+      ry = /side$/.test(ky) ? side(ky, cy, H - cy) : resolveLen(ky, H);
+    }
+    if (!(rx > 0 && ry > 0)) return null;
+    return { type: 'ELLIPSE', x: r2(cx - rx), y: r2(cy - ry), w: r2(2 * rx), h: r2(2 * ry) };
+  }
+  if (fn[1] === 'inset') {
+    const [box, round] = args.split(/\s+round\s+/);
+    const t = splitSpaces(box);
+    const T = resolveLen(t[0] || '0', H), R = resolveLen(t[1] || t[0] || '0', W), B = resolveLen(t[2] || t[0] || '0', H), L = resolveLen(t[3] || t[1] || t[0] || '0', W);
+    if (!(W - L - R > 0 && H - T - B > 0)) return null;
+    const rad = round ? resolveLen(splitSpaces(round)[0], Math.min(W, H)) : 0;
+    const rv = r2(Math.min(rad, (W - L - R) / 2, (H - T - B) / 2));
+    return { type: 'RECT', x: r2(L), y: r2(T), w: r2(W - L - R), h: r2(H - T - B), radii: rv ? { tl: rv, tr: rv, br: rv, bl: rv } : null };
+  }
+  return null;
 }
 
 // outline / outline-offset: a stroke-only rectangle around the border box, as an

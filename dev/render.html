@@ -241,7 +241,42 @@ function build(n, parent, images) {
   }
   parent ? parent.el.appendChild(el) : document.body.appendChild(el);
   const self = { el, layout: l, flowCount: 0 };
-  for (const c of n.children || []) build(c, self, images);
+  for (const c of n.children || []) {
+    if (c.isMask) { applyMask(el, c, images); continue; }
+    build(c, self, images);
+  }
+}
+
+// Figma masks clip the layers above them: emulate on the parent element.
+function applyMask(el, m, images) {
+  if (m.maskType === 'VECTOR') {
+    let clip;
+    if (m.type === 'VECTOR') {
+      let i = 0;
+      const d = m.d.replace(/-?[\d.]+(?:e-?\d+)?/g, (v) => String(+v + (i++ % 2 ? m.y : m.x)));
+      clip = `path(${m.rule === 'EVENODD' ? 'evenodd, ' : ''}'${d}')`;
+    } else if (m.type === 'ELLIPSE') clip = `ellipse(${m.w / 2}px ${m.h / 2}px at ${m.x + m.w / 2}px ${m.y + m.h / 2}px)`;
+    else {
+      const r = m.radii ? ` round ${m.radii.tl}px` : '';
+      clip = `inset(${m.y}px calc(100% - ${m.x + m.w}px) calc(100% - ${m.y + m.h}px) ${m.x}px${r})`;
+    }
+    el.style.clipPath = clip;
+    return;
+  }
+  const p = (m.fills || [])[0];
+  if (!p) return;
+  let url = null, size = '100% 100%';
+  if (p.type === 'IMAGE' && images[p.ref]) { url = images[p.ref]; size = p.scaleMode === 'FIT' ? 'contain' : 'cover'; }
+  else if (p.gradientStops) {
+    const layer = paintLayer(p, images);
+    const svg = layer.querySelector('svg');
+    if (svg) { svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.outerHTML); }
+  }
+  if (!url) return;
+  for (const k of ['maskImage', 'webkitMaskImage']) el.style[k] = `url("${url}")`;
+  for (const k of ['maskSize', 'webkitMaskSize']) el.style[k] = size;
+  for (const k of ['maskRepeat', 'webkitMaskRepeat']) el.style[k] = 'no-repeat';
+  for (const k of ['maskPosition', 'webkitMaskPosition']) el.style[k] = `${m.x}px ${m.y}px`;
 }
 
 window.renderTree = async (json) => {

@@ -71,6 +71,10 @@ function buildNode(n, parent, ctx) {
     shapeNode(node, n, ctx);
     if (n.layout) applyLayout(node, n);
     place(node, n, parent);
+    if (n.isMask) {
+      node.isMask = true;
+      try { node.maskType = n.maskType || 'ALPHA'; } catch (e) { /* older API: alpha masks only */ }
+    }
   } catch (e) {
     ctx.failed++;
     if (node && !node.removed) node.remove();
