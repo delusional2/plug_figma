@@ -1084,6 +1084,7 @@ function shift(node, ox, oy) {
 }
 
 function frameNode(el, box, visual, common, children) {
+  if (visual.innerRect) children = [visual.innerRect].concat(children);
   return {
     type: 'FRAME', name: nameFor(el), ...box,
     fills: visual.fills, stroke: visual.stroke, radii: visual.radii, effects: visual.effects, clip: visual.clip,
@@ -1119,7 +1120,8 @@ function nameFor(el) {
 // ---------- box styles ----------
 
 function boxVisual(el, cs, box) {
-  const fills = backgroundFills(cs, box);
+  const inner = {};
+  const fills = backgroundFills(cs, box, inner);
   const stroke = borders(cs, box);
   if (stroke && stroke.fillOverride) {
     if (!fills.length) fills.push(...stroke.fillOverride);
@@ -1133,7 +1135,14 @@ function boxVisual(el, cs, box) {
   const bgBlur = blur(cs.backdropFilter || cs.webkitBackdropFilter);
   if (bgBlur) effects.push({ type: 'BACKGROUND_BLUR', radius: bgBlur * 2, visible: true });
   const clip = [cs.overflowX, cs.overflowY].some((o) => o !== 'visible');
-  return { fills, stroke, radii: radii(cs, box), effects, clip, has: !!(fills.length || stroke || effects.length) };
+  const rr = radii(cs, box);
+  let innerRect = null;
+  if (inner.fills && inner.fills.length) {
+    const ir = rr && { tl: r2(Math.max(0, rr.tl - Math.max(inner.x, inner.y))), tr: r2(Math.max(0, rr.tr - Math.max(box.w - inner.x - inner.w, inner.y))),
+      br: r2(Math.max(0, rr.br - Math.max(box.w - inner.x - inner.w, box.h - inner.y - inner.h))), bl: r2(Math.max(0, rr.bl - Math.max(inner.x, box.h - inner.y - inner.h))) };
+    innerRect = { type: 'RECT', name: 'background', absolute: true, x: r2(inner.x), y: r2(inner.y), w: r2(inner.w), h: r2(inner.h), fills: inner.fills, radii: ir };
+  }
+  return { fills, stroke, radii: rr, effects, clip, innerRect, has: !!(fills.length || stroke || effects.length || innerRect) };
 }
 
 // Cheap version of boxVisual for "does this inline element draw a box?".
@@ -1146,8 +1155,19 @@ function hasPaint(cs) {
   return !!borders(cs) || parseShadows(cs.boxShadow).length > 0;
 }
 
-function backgroundFills(cs, box) {
+function backgroundFills(cs, box, inner) {
   const fills = [];
+  // background-clip: padding-box layers on top of border-box ones (the gradient-border
+  // trick) can't share one Figma fill list: they go to an inset child instead.
+  const clips = splitTop(cs.backgroundClip || '').map((c) => c.trim());
+  const bw = SIDES.map((sd) => parseFloat(cs[`border${sd}Width`]) || 0);
+  let nInner = 0;
+  if (inner && box && bw.some((v) => v > 0) && cs.backgroundImage !== 'none') {
+    const nl = splitTop(cs.backgroundImage).length;
+    const isIn = (i) => /padding-box|content-box/.test(clips.length ? clips[i % clips.length] : '');
+    while (nInner < nl && isIn(nInner)) nInner++;
+    if (nInner === nl || !Array.from({ length: nl - nInner }, (_, j) => !isIn(nInner + j)).every(Boolean)) nInner = 0;
+  }
   if (cs.webkitBackgroundClip === 'text' || cs.backgroundClip === 'text') return fills;
   const c = parseColor(cs.backgroundColor);
   if (c && c.a > 0) fills.push(solid(c));
@@ -1160,6 +1180,15 @@ function backgroundFills(cs, box) {
     // CSS lists the top layer first, Figma wants it last.
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i].trim();
+      if (i < nInner) {
+        const ib = { x: bw[3], y: bw[0], w: box.w - bw[1] - bw[3], h: box.h - bw[0] - bw[2] };
+        if (ib.w > 0 && ib.h > 0) {
+          if (!inner.fills) Object.assign(inner, ib, { fills: [] });
+          const g = gradientPaint(layer, ib.w, ib.h);
+          if (g) inner.fills.push(g);
+        }
+        continue;
+      }
       const url = /^url\(\s*["']?(.*?)["']?\s*\)$/.exec(layer);
       if (url) {
         if (S.opts.images) {
@@ -1177,12 +1206,74 @@ function backgroundFills(cs, box) {
           fills.push({ type: 'IMAGE', ref: imageRef(url[1], null, bg, box.w, box.h), scaleMode: /contain/.test(size) ? 'FIT' : 'FILL' });
         }
       } else {
-        const g = gradientPaint(layer, box.w, box.h);
+        let g = null;
+        try { g = gradientLayer(cs, box, layer, at(sizes, i) || 'auto', at(posX, i) || '0%', at(posY, i) || '0%', at(reps, i) || 'repeat'); } catch (e) {}
+        if (g === null) g = gradientPaint(layer, box.w, box.h);
         if (g) fills.push(g);
       }
     }
   }
   return fills;
+}
+
+const mul3 = (A, B) => [0, 1].map((r) => [0, 1, 2].map((c) => A[r][0] * B[0][c] + A[r][1] * B[1][c] + (c === 2 ? A[r][2] : 0)));
+
+// A gradient layer with its background-size / position / repeat: one tile covering
+// the box stays a vector (transform composed), anything else is drawn as a tile image.
+// Returns undefined to skip the layer, null to fall back to a box-sized gradient.
+function gradientLayer(cs, box, layer, size, px, py, repeat) {
+  const n = (p) => parseFloat(cs[p]) || 0;
+  const ox = n('borderLeftWidth'), oy = n('borderTopWidth');
+  const aw = box.w - ox - n('borderRightWidth'), ah = box.h - oy - n('borderBottomWidth');
+  if (!(aw > 0 && ah > 0)) return null;
+  const sz = splitSpaces(size);
+  let tw = aw, th = ah;
+  if (!/^(cover|contain)$/.test(sz[0])) {
+    if (sz[0] && sz[0] !== 'auto') tw = resolveLen(sz[0], aw);
+    if (sz[1] && sz[1] !== 'auto') th = resolveLen(sz[1], ah);
+  }
+  if (!(tw > 0.01 && th > 0.01)) return undefined;
+  const X0 = ox + resolveLen(px, aw - tw), Y0 = oy + resolveLen(py, ah - th);
+  const T = 0.5;
+  if (X0 <= ox + T && Y0 <= oy + T && X0 + tw >= ox + aw - T && Y0 + th >= oy + ah - T) {
+    if (Math.abs(tw - box.w) < T && Math.abs(th - box.h) < T && Math.abs(X0) < T && Math.abs(Y0) < T) return null;
+    const G = gradientPaint(layer, tw, th);
+    if (!G) return undefined;
+    G.gradientTransform = mul3(G.gradientTransform, [[box.w / tw, 0, -X0 / tw], [0, box.h / th, -Y0 / th]]);
+    return G;
+  }
+  if (!S.opts.images) return null;
+  const G = gradientPaint(layer, tw, th);
+  if (!G) return undefined;
+  const url = gradientTile(G, tw, th);
+  if (!url) return null;
+  const bg = { w: r2(box.w), h: r2(box.h), size: `${tw}px ${th}px`, px: `${X0 - ox}px`, py: `${Y0 - oy}px`, repeat, ox, oy, aw: r2(aw), ah: r2(ah) };
+  return { type: 'IMAGE', ref: imageRef(url, null, bg, box.w, box.h), scaleMode: 'FILL' };
+}
+
+// One gradient tile as a PNG data URL (2x), drawn from the Figma paint itself.
+function gradientTile(G, tw, th) {
+  const k = Math.min(2, 2048 / Math.max(tw, th));
+  const cw = Math.max(1, Math.round(tw * k)), ch = Math.max(1, Math.round(th * k));
+  const c = document.createElement('canvas');
+  c.width = cw;
+  c.height = ch;
+  const ctx = c.getContext('2d');
+  const [[a, b, e], [d, f2, g2]] = G.gradientTransform;
+  const det = a * f2 - b * d;
+  if (!det) return null;
+  // inverse of the unit-box -> gradient-space transform, then unit box -> canvas px
+  const ia = f2 / det, ib = -b / det, ic = (b * g2 - e * f2) / det, id = -d / det, ie = a / det, iff = (e * d - a * g2) / det;
+  ctx.setTransform(cw * ia, ch * id, cw * ib, ch * ie, cw * ic, ch * iff);
+  let grad;
+  if (G.type === 'GRADIENT_LINEAR') grad = ctx.createLinearGradient(0, 0.5, 1, 0.5);
+  else if (G.type === 'GRADIENT_RADIAL') grad = ctx.createRadialGradient(0.5, 0.5, 0, 0.5, 0.5, 0.5);
+  else if (ctx.createConicGradient) grad = ctx.createConicGradient(0, 0.5, 0.5);
+  else return null;
+  for (const st of G.gradientStops) grad.addColorStop(clamp01(st.position), `rgba(${Math.round(st.color.r * 255)},${Math.round(st.color.g * 255)},${Math.round(st.color.b * 255)},${st.color.a})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(-1000, -1000, 2000, 2000);
+  return c.toDataURL('image/png');
 }
 
 // 3D border styles: Chrome shades each side (calibrated on the default <hr>,
