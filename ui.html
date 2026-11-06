@@ -59,7 +59,7 @@
   .row { display: flex; align-items: center; gap: 8px; }
   .row > .grow { flex: 1; min-width: 0; }
   .filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--figma-color-text-secondary, #757575); }
-  select, input[type="number"] {
+  select, input[type="number"], input[type="text"] {
     height: 28px;
     padding: 0 8px;
     border: 1px solid var(--figma-color-border, #e6e6e6);
@@ -69,6 +69,7 @@
     background: var(--figma-color-bg, #fff);
   }
   input[type="number"] { width: 84px; }
+  input[type="text"]:focus { outline: none; border-color: var(--figma-color-border-selected, #0d99ff); }
   label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   label.check input { margin: 0; accent-color: var(--figma-color-bg-brand, #0d99ff); }
   .hint { color: var(--figma-color-text-tertiary, #b3b3b3); }
@@ -114,8 +115,12 @@
 <main>
   <header>
     <h1>HTML → Figma</h1>
-    <p class="muted">Вставь HTML или перетащи .html файл — получишь редактируемые слои.</p>
+    <p class="muted">Вставь HTML, ссылку или данные из закладки «Скопировать для Figma» — получишь редактируемые слои.</p>
   </header>
+
+  <div class="row">
+    <input id="url" class="grow" type="text" spellcheck="false" autocomplete="off" placeholder="Ссылка или localhost: https://… · localhost:5173">
+  </div>
 
   <div class="drop">
     <textarea id="html" spellcheck="false" placeholder="<!doctype html>&#10;<html>…</html>"></textarea>
@@ -125,7 +130,7 @@
   <div class="row">
     <button id="open" class="secondary">Открыть файл…</button>
     <span id="filename" class="filename grow"></span>
-    <input id="file" type="file" accept=".html,.htm,text/html" hidden>
+    <input id="file" type="file" accept=".html,.htm,text/html,.json,application/json" hidden>
   </div>
 
   <div class="row">
@@ -154,10 +159,13 @@
 // imported HTML and runs there: Figma's plugin UI is sandboxed, so it can't
 // read the iframe's DOM from outside. The agent measures the page and posts
 // the finished layer tree back to the UI.
-function pageAgent() {
+// Also runs on a live page from the bookmarklet (mode 'live'): then it only returns
+// { run(onProgress) } and talks to nobody.
+function pageAgent(mode) {
+const LIVE = mode === 'live';
 // prepareHtml() puts the agent at the very top of <head>; never run twice.
-if (window.__h2fAgent) return;
-window.__h2fAgent = true;
+if (window.__h2fAgent) return window.__h2fAgent;
+window.__h2fAgent = { run: runLive };
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'BASE', 'WBR']);
 const ATOMIC_TAGS = new Set(['IMG', 'SVG', 'VIDEO', 'CANVAS', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'OBJECT', 'EMBED', 'PICTURE', 'AUDIO']);
 const ALIGN = { left: 'LEFT', start: 'LEFT', '-webkit-left': 'LEFT', right: 'RIGHT', end: 'RIGHT', '-webkit-right': 'RIGHT', center: 'CENTER', '-webkit-center': 'CENTER', justify: 'JUSTIFIED' };
@@ -238,37 +246,78 @@ const PEND = { net: 0, timers: new Set(), depth: 0, lastMut: performance.now() }
   } catch (e) {}
 })();
 
-addEventListener('message', async (e) => {
-  if (e.source !== parent || !e.data || e.data.h2f !== 'extract') return;
-  send({ kind: 'ack' });
-  try {
-    const opts = e.data.opts;
-    const warnings = [];
-    send({ kind: 'progress', text: 'Жду, пока страница догрузится…' });
-    try { if (!(await tailwindOk())) warnings.push('tailwind'); } catch (err) {}
+// The whole job: wait for the page, measure it, load the images.
+async function runExtract(opts, progress) {
+  const warnings = [];
+  progress('Жду, пока страница догрузится…');
+  try { if (!(await tailwindOk())) warnings.push('tailwind'); } catch (err) {}
+  if (!opts.live) {
     try { forceLightScheme(); } catch (err) {}
-    await settle();
-    // Scroll through the page so lazy images and "reveal on scroll" scripts fire.
-    const total = docHeight();
-    for (let y = 0; y < total; y += opts.height * 0.75) {
-      scrollTo(0, y);
-      await sleep(40);
-    }
-    scrollTo(0, 0);
-    await settle();
-
-    send({ kind: 'progress', text: 'Разбираю вёрстку…' });
-    try { materializePseudos(); } catch (err) { console.warn('html-to-figma: pseudo-elements skipped', err); }
-    const root = extract(opts);
-    const list = [...S.images.values()];
-    if (list.length) await loadImages(list, (i, n) => send({ kind: 'progress', text: `Загружаю картинки ${i}/${n}…` }));
-    const images = dedupeImages(list.map((it) => ({ ref: it.ref, url: /^https?:/i.test(it.url) ? it.url : null, bytes: it.bytes || null, slow: it.slow || undefined })));
-    send({ kind: 'result', root, images, warnings });
-  } catch (err) {
-    send({ kind: 'error', message: String((err && err.message) || err) });
   }
-});
-send({ kind: 'ready' });
+  await settle();
+  // Scroll through the page so lazy images and "reveal on scroll" scripts fire.
+  const total = docHeight();
+  for (let y = 0; y < total; y += opts.height * 0.75) {
+    scrollTo(0, y);
+    await sleep(40);
+  }
+  scrollTo(0, 0);
+  await settle();
+
+  progress('Разбираю вёрстку…');
+  let root;
+  try {
+    try { materializePseudos(); } catch (err) { console.warn('html-to-figma: pseudo-elements skipped', err); }
+    root = extract(opts);
+  } finally {
+    if (opts.live) cleanupLive();
+  }
+  const list = [...S.images.values()];
+  if (list.length) await loadImages(list, (i, n) => progress(`Загружаю картинки ${i}/${n}…`));
+  const images = dedupeImages(list.map((it) => ({ ref: it.ref, url: /^https?:/i.test(it.url) ? it.url : null, bytes: it.bytes || null, slow: it.slow || undefined })));
+  return { root, images, warnings };
+}
+
+// Bookmarklet: the page as the user sees it (real viewport width, own color scheme).
+async function runLive(progress) {
+  const sx = scrollX, sy = scrollY;
+  if (!motion.isConnected) (document.head || document.documentElement).appendChild(motion);
+  try {
+    return await runExtract({
+      width: document.documentElement.clientWidth || innerWidth,
+      height: innerHeight,
+      autoLayout: true,
+      images: true,
+      live: true,
+    }, progress || (() => {}));
+  } finally {
+    motion.remove();
+    scrollTo(sx, sy);
+  }
+}
+
+// Undo what materializePseudos() added to a live page.
+function cleanupLive() {
+  try {
+    for (const n of document.querySelectorAll(PSEUDO_TAG)) n.remove();
+    for (const n of document.querySelectorAll('[data-h2f-b],[data-h2f-a]')) { n.removeAttribute('data-h2f-b'); n.removeAttribute('data-h2f-a'); }
+    for (const st of document.querySelectorAll('style')) if (st.textContent.indexOf('[data-h2f-b]::before') === 0) st.remove();
+  } catch (e) {}
+}
+
+if (!LIVE) {
+  addEventListener('message', async (e) => {
+    if (e.source !== parent || !e.data || e.data.h2f !== 'extract') return;
+    send({ kind: 'ack' });
+    try {
+      const r = await runExtract(e.data.opts, (text) => send({ kind: 'progress', text }));
+      send(Object.assign({ kind: 'result' }, r));
+    } catch (err) {
+      send({ kind: 'error', message: String((err && err.message) || err) });
+    }
+  });
+  send({ kind: 'ready' });
+}
 
 // Resolves once the page has had no pending fetch/XHR/short timer and no DOM
 // mutation for a moment (or when the time budget runs out: some pages never rest).
@@ -3978,6 +4027,8 @@ async function toPng(source, w, h) {
   if (!blob) throw new Error('canvas export failed');
   return new Uint8Array(await blob.arrayBuffer());
 }
+
+return window.__h2fAgent;
 }
 
 // ---------- page preparation ----------
@@ -4090,6 +4141,34 @@ function injectHead(html, snippet) {
     if (m) return html.slice(0, m.index + m[0].length) + snippet + html.slice(m.index + m[0].length);
   }
   return snippet + html;
+}
+
+// A page fetched by URL renders from srcdoc (about:srcdoc), so relative CSS, images
+// and scripts need a <base> pointing at where the page came from. An existing
+// <base href> is made absolute against that address.
+function withBase(html, pageUrl) {
+  const esc = (u) => u.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  let found = false;
+  const out = html.replace(/<base\b([^>]*?)\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))([^>]*)>/i, (m, pre, q, a, b, c, post) => {
+    found = true;
+    let abs = pageUrl;
+    try { abs = new URL((a != null ? a : b != null ? b : c).replace(/&amp;/g, '&'), pageUrl).href; } catch (e) {}
+    return '<base' + pre + 'href="' + esc(abs) + '"' + post + '>';
+  });
+  return found ? out : injectHead(html, '<base href="' + esc(pageUrl) + '">');
+}
+
+// "localhost:5173", "5173", "example.com/page" -> a full URL; null when it isn't one.
+function normalizeUrl(s) {
+  let u = String(s || '').trim();
+  if (!u || /\s/.test(u) || /^[<{\[]/.test(u)) return null;
+  if (/^\d{2,5}$/.test(u)) u = 'localhost:' + u;
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(u)) {
+    if (!/^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0|[\w-]+(\.[\w-]+)+)(:\d+)?(\/|$|\?|#)/i.test(u)) return null;
+    u = (/^(localhost|127\.|\[::1\]|0\.0\.0\.0)/i.test(u) ? 'http://' : 'https://') + u;
+  }
+  if (!/^https?:/i.test(u)) return null;
+  try { return new URL(u.replace(/^(https?:\/\/)0\.0\.0\.0/i, '$1localhost')).href; } catch (e) { return null; }
 }
 
 // ---------- JSX / TSX components (v0, Claude artifacts, shadcn) ----------
@@ -4291,10 +4370,51 @@ $('file').addEventListener('change', () => {
   $('file').value = '';
 });
 
+// A .json from the bookmarklet is kept aside (it can be megabytes): the textarea only says so.
+let pendingPayload = null;
+
 async function loadFile(file) {
-  $('html').value = await file.text();
+  const text = await file.text();
+  pendingPayload = null;
+  if (/\.json$/i.test(file.name) || /^\s*\{/.test(text)) {
+    const p = parsePayload(text);
+    if (p) {
+      pendingPayload = p;
+      $('html').value = '';
+      $('url').value = '';
+      $('filename').textContent = `${file.name} — снимок страницы «${p.name}», нажми «Импортировать»`;
+      setStatus('');
+      return;
+    }
+  }
+  $('html').value = text;
   $('filename').textContent = file.name;
   setStatus('');
+}
+
+// The bookmarklet's payload: {"h2f":1, name, root, images:[{ref, url, base64}]}.
+function parsePayload(text) {
+  const t = String(text || '').trim();
+  if (t[0] !== '{' || t.indexOf('"h2f"') < 0) return null;
+  let p;
+  try { p = JSON.parse(t); } catch (e) { return null; }
+  if (!p || p.h2f !== 1 || !p.root || typeof p.root !== 'object') return null;
+  return p;
+}
+
+function payloadDoc(p) {
+  const images = (p.images || []).map((im) => {
+    let bytes = null;
+    if (im.base64) {
+      try {
+        const bin = atob(im.base64);
+        bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } catch (e) { bytes = null; }
+    }
+    return { ref: im.ref, url: im.url || null, bytes, same: im.same || undefined };
+  });
+  return { name: p.name || p.root.name || 'Страница', root: p.root, images };
 }
 
 let dragDepth = 0;
@@ -4305,11 +4425,12 @@ document.addEventListener('drop', (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove('dragging');
-  const file = [...e.dataTransfer.files].find((f) => /\.html?$/i.test(f.name) || f.type === 'text/html') || e.dataTransfer.files[0];
+  const file = [...e.dataTransfer.files].find((f) => /\.(html?|json)$/i.test(f.name) || /html|json/.test(f.type)) || e.dataTransfer.files[0];
   if (file) loadFile(file);
 });
 
-$('html').addEventListener('input', () => { $('filename').textContent = ''; });
+$('html').addEventListener('input', () => { $('filename').textContent = ''; pendingPayload = null; });
+$('url').addEventListener('keydown', (e) => { if (e.key === 'Enter') runImport(); });
 $('go').addEventListener('click', runImport);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runImport();
@@ -4345,16 +4466,67 @@ window.addEventListener('message', (e) => {
   }
 });
 
+const FETCH_FAILED = 'Не получилось загрузить страницу по ссылке. Чаще всего сайт не разрешает читать себя из плагина (CORS) или он недоступен. '
+  + 'Что сделать: открой страницу в браузере, нажми закладку «Скопировать для Figma» (её можно взять из bookmarklet.html в папке плагина) и вставь результат сюда.';
+const LOCAL_HINT = ' Если это localhost — проверь, что dev-сервер запущен, а его порт есть в devAllowedDomains в manifest.json.';
+
+async function fetchPage(url) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 20000);
+  const local = /^https?:\/\/(localhost|127\.|\[::1\])/i.test(url);
+  let res, text;
+  try {
+    res = await fetch(url, { signal: ac.signal, cache: 'no-store', credentials: 'omit' });
+    if (res.ok) text = await res.text();
+  } catch (e) {
+    throw new Error(e && e.name === 'AbortError' ? 'страница не загрузилась за 20 секунд.' + (local ? LOCAL_HINT : '') : FETCH_FAILED + (local ? LOCAL_HINT : ''));
+  } finally {
+    clearTimeout(t);
+  }
+  if (!res.ok) throw new Error(`сайт ответил ${res.status}${res.statusText ? ' ' + res.statusText : ''}.`);
+  if (!/<[a-z!]/i.test(text)) throw new Error('по ссылке пришёл не HTML.');
+  return withBase(text, res.url || url);
+}
+
 async function runImport() {
   if (busy) return;
-  const html = $('html').value.trim();
-  if (!html) {
-    setStatus('Сначала вставь HTML', 'error');
+  let html = $('html').value.trim();
+  // A snapshot from the bookmarklet: already measured, build it as it is.
+  const payload = pendingPayload || (!$('url').value.trim() && parsePayload(html));
+  if (payload) {
+    lock(true);
+    lastWarnings = [];
+    try {
+      const doc = payloadDoc(payload);
+      setStatus('Создаю слои в Figma…');
+      parent.postMessage({ pluginMessage: { type: 'import', doc } }, '*');
+    } catch (err) {
+      lock(false);
+      setStatus('Ошибка: ' + ((err && err.message) || err), 'error');
+    }
+    return;
+  }
+  if (/^\s*\{[\s\S]*"h2f"/.test(html)) {
+    setStatus('Это похоже на данные из закладки, но они повреждены или обрезаны — скопируй ещё раз', 'error');
+    return;
+  }
+  const typed = $('url').value.trim();
+  const url = normalizeUrl(typed) || (!typed ? normalizeUrl(html) : null);
+  if (typed && !url) {
+    setStatus('Это не похоже на ссылку: нужно https://… или localhost:порт', 'error');
+    return;
+  }
+  if (!html && !url) {
+    setStatus('Сначала вставь HTML или ссылку', 'error');
     return;
   }
   const [width, height] = currentSize();
   lock(true);
   try {
+    if (url) {
+      setStatus('Загружаю страницу…');
+      html = await fetchPage(url);
+    }
     const prep = prepareHtml(html, { agent: true });
     setStatus(prep.jsx ? 'Собираю React-компонент…' : prep.tailwind ? 'Рендерю страницу (подключаю Tailwind)…' : 'Рендерю страницу…');
     const { root, images, warnings } = await renderAndExtract(prep.html, {

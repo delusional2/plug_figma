@@ -15,8 +15,11 @@
     const ui = await (await fetch('../ui.html')).text();
     // The plugin's first <script>: the page agent plus prepareHtml() and friends.
     const firstScript = /<script>\n([\s\S]*?)<\/script>/.exec(ui)[1];
-    const { prepareHtml } = new Function(firstScript + '\n;return { prepareHtml };')();
-    const html = prepareHtml(await (await fetch(q.get('case'))).text(), { agent: true }).html;
+    const { prepareHtml, withBase } = new Function(firstScript + '\n;return { prepareHtml, withBase };')();
+    // ?url= : like the plugin's import by link (fetched page + <base href> for its relative assets).
+    const pageUrl = q.get('url') ? new URL(q.get('url'), location.href).href : null;
+    const src = pageUrl ? withBase(await (await fetch(pageUrl)).text(), pageUrl) : await (await fetch(q.get('case'))).text();
+    const html = prepareHtml(src, { agent: true }).html;
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.style.colorScheme = 'light';

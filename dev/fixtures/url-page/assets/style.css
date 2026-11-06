@@ -1,0 +1,5 @@
+body { margin: 0; font-family: Inter, sans-serif; background: #fff; }
+.hero { background: rgb(18, 52, 86); color: #fff; padding: 48px; }
+.grid { display: flex; gap: 24px; padding: 32px; }
+.tile { width: 240px; height: 160px; background: url(tile.svg) center / cover no-repeat; border-radius: 12px; }
+.js-ok .hero h1::after { content: " ✓"; }
