@@ -40,8 +40,8 @@ async function importDocument(doc) {
 
   const page = figma.currentPage;
   const others = page.children.slice();
-  const ctx = { font: font, images: images, count: 0, failed: 0 };
-  const root = buildNode(doc.root, page, ctx);
+  const ctx = { font: font, images: images, count: 0, failed: 0, total: countNodes(doc.root) };
+  const root = await buildNode(doc.root, page, ctx);
   if (!root) throw new Error('Не получилось создать слои');
   root.name = doc.name;
   if (doc.root.fixedCount) {
@@ -66,7 +66,21 @@ async function importDocument(doc) {
 
 // ---------- nodes ----------
 
-function buildNode(n, parent, ctx) {
+function countNodes(n) {
+  let k = 1;
+  if (n.children) for (const c of n.children) k += countNodes(c);
+  return k;
+}
+
+// Big pages: give Figma a breath (and the UI a progress line) every ~150 layers
+// instead of freezing until the whole tree is built.
+const CHUNK = 150;
+function pause(ctx) {
+  progress('Создаю слои ' + ctx.count + ' / ' + ctx.total + '…');
+  return new Promise(function (resolve) { setTimeout(resolve, 0); });
+}
+
+async function buildNode(n, parent, ctx) {
   let node = null;
   try {
     node = createNode(n, ctx);
@@ -85,8 +99,9 @@ function buildNode(n, parent, ctx) {
     return null;
   }
   ctx.count++;
+  if (ctx.count % CHUNK === 0) await pause(ctx);
   if (n.type === 'FRAME' && n.children) {
-    for (const c of n.children) buildNode(c, node, ctx);
+    for (const c of n.children) await buildNode(c, node, ctx);
     // Hug only after children exist, otherwise the frame collapses first.
     if (n.layout && n.layout.primarySizing === 'AUTO') node.primaryAxisSizingMode = 'AUTO';
     if (n.layout && n.layout.counterSizing === 'AUTO') node.counterAxisSizingMode = 'AUTO';
@@ -295,6 +310,7 @@ async function prepareImages(list) {
         continue;
       } catch (e) {}
     }
+    if (im.same) continue; // the same bytes as an earlier image
     // The UI could not read the file (CORS, or too slow there) — let Figma try the URL itself.
     if (im.url && /^https?:/i.test(im.url)) remote.push(im);
   }
@@ -313,6 +329,7 @@ async function prepareImages(list) {
   const pool = [];
   for (let i = 0; i < Math.min(4, remote.length); i++) pool.push(worker());
   await Promise.all(pool);
+  for (const im of list) if (im.same && hashes[im.same]) hashes[im.ref] = hashes[im.same];
   return hashes;
 }
 

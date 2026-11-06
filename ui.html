@@ -262,7 +262,7 @@ addEventListener('message', async (e) => {
     const root = extract(opts);
     const list = [...S.images.values()];
     if (list.length) await loadImages(list, (i, n) => send({ kind: 'progress', text: `Загружаю картинки ${i}/${n}…` }));
-    const images = list.map((it) => ({ ref: it.ref, url: /^https?:/i.test(it.url) ? it.url : null, bytes: it.bytes || null, slow: it.slow || undefined }));
+    const images = dedupeImages(list.map((it) => ({ ref: it.ref, url: /^https?:/i.test(it.url) ? it.url : null, bytes: it.bytes || null, slow: it.slow || undefined })));
     send({ kind: 'result', root, images, warnings });
   } catch (err) {
     send({ kind: 'error', message: String((err && err.message) || err) });
@@ -3789,6 +3789,24 @@ async function loadImages(list, onProgress, budgetMs = 30000) {
   for (const it of queue) it.slow = true;
 }
 
+// Identical files (the same logo or avatar under different URLs) are sent once:
+// later copies only name the first one in "same".
+function dedupeImages(images) {
+  const seen = new Map();
+  for (const im of images) {
+    const b = im.bytes;
+    if (!b) continue;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 16777619);
+    const key = b.length + ':' + (h >>> 0);
+    const first = (seen.get(key) || []).find((o) => o.bytes.length === b.length && o.bytes.every((v, i) => v === b[i]));
+    if (first) { im.bytes = null; im.same = first.ref; continue; }
+    if (!seen.has(key)) seen.set(key, []);
+    seen.get(key).push(im);
+  }
+  return images;
+}
+
 function sniff(b) {
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';
   if (b[0] === 0xff && b[1] === 0xd8) return 'jpeg';
@@ -3825,10 +3843,25 @@ async function imageBytesInner(url, el, outer, setSlow, bg, dw, dh) {
   }
   if (blob) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
+    const kind = sniff(bytes);
     let bmp = null;
     try { bmp = await createImageBitmap(blob); } catch (e) {}
-    if (sniff(bytes) && (!bmp || (bmp.width <= 4096 && bmp.height <= 4096))) return bytes;
-    if (bmp) return toPng(bmp, bmp.width, bmp.height);
+    try {
+      if (bmp) {
+        const W = bmp.width, H = bmp.height;
+        // Pixels needed: 2x the largest size it is shown at (cover: the larger ratio), at least
+        // a 1024px long side so it can still be enlarged in Figma, never above 4096.
+        let k = dw && dh ? 2 * Math.max(dw / W, dh / H) : 1;
+        k = Math.max(k, Math.min(1, 1024 / Math.max(W, H)));
+        k = Math.min(1, k, 4096 / Math.max(W, H));
+        // Original bytes when Figma takes them as they are and they are not grossly oversized (GIFs may be animated).
+        if (kind && W <= 4096 && H <= 4096 && (kind === 'gif' || k > 0.5 || bytes.length < 600000)) return bytes;
+        return await encodeImage(bmp, W * k, H * k, kind === 'jpeg');
+      }
+      if (kind) return bytes; // could not decode here, Figma may still take it
+    } finally {
+      if (bmp && bmp.close) bmp.close();
+    }
     // SVG files can't go through createImageBitmap — draw them via <img>, at
     // twice the largest size they are shown at (vectors re-render sharp).
     const img = await loadImg(URL.createObjectURL(blob));
@@ -3912,6 +3945,25 @@ async function filterBytes(bytes, filter) {
   ctx.filter = filter;
   ctx.drawImage(bmp, 0, 0);
   const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('canvas export failed');
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+// Downscaled copy: JPEG for opaque pictures (photos), PNG when any pixel is transparent.
+async function encodeImage(source, w, h, knownOpaque) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w));
+  c.height = Math.max(1, Math.round(h));
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, 0, 0, c.width, c.height);
+  let opaque = knownOpaque;
+  if (!opaque) {
+    opaque = true;
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] < 255) { opaque = false; break; }
+  }
+  const blob = await new Promise((r) => c.toBlob(r, opaque ? 'image/jpeg' : 'image/png', 0.9));
   if (!blob) throw new Error('canvas export failed');
   return new Uint8Array(await blob.arrayBuffer());
 }

@@ -250,7 +250,7 @@ async function runCase(c) {
   fs.writeFileSync(path.join(OUT, name + '.diff.png'), Buffer.from(d.png, 'base64'));
   const count = (n) => 1 + (n.children || []).reduce((a, k) => a + count(k), 0);
   const al = (n) => (n.layout ? 1 : 0) + (n.children || []).reduce((a, k) => a + al(k), 0);
-  return { case: name, diffPct: +d.pct.toFixed(2), heightDelta: d.heightDelta, layers: count(doc.root), autoLayouts: al(doc.root), images: doc.images.length, imagesMissing: doc.images.filter((i) => !i.bytes).length, slowImages: doc.images.filter((i) => i.slow).length || undefined, missingFonts: rr.missingFonts || undefined, warnings: (doc.warnings || []).join(',') || undefined, mockErrors: mockErrors ? String(mockErrors).slice(0, 400) : 0 };
+  return { case: name, diffPct: +d.pct.toFixed(2), heightDelta: d.heightDelta, layers: count(doc.root), autoLayouts: al(doc.root), images: doc.images.length, imagesMissing: doc.images.filter((i) => !i.bytes && !i.same).length, slowImages: doc.images.filter((i) => i.slow).length || undefined, missingFonts: rr.missingFonts || undefined, warnings: (doc.warnings || []).join(',') || undefined, mockErrors: mockErrors ? String(mockErrors).slice(0, 400) : 0 };
 }
 
 const results = [];

@@ -301,7 +301,8 @@ window.renderTree = async (json) => {
       const u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
       images[im.ref] = URL.createObjectURL(new Blob([u8]));
-    } else if (im.url) images[im.ref] = im.url;
+    } else if (im.same && images[im.same]) images[im.ref] = images[im.same];
+    else if (im.url) images[im.ref] = im.url;
   }
   document.body.innerHTML = '';
   // Figma ships every Google Font, so load the families the tree asks for.
