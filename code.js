@@ -13,17 +13,24 @@ figma.clientStorage.getAsync(SETTINGS_KEY)
   .then((s) => figma.ui.postMessage({ type: 'settings', settings: s || null }))
   .catch(() => {});
 
+let batchNodes = []; // frames of a multi-file import, selected together at the end
+
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'save-settings') {
     figma.clientStorage.setAsync(SETTINGS_KEY, msg.settings).catch(() => {});
   } else if (msg.type === 'import') {
     try {
-      const result = await importDocument(msg.doc);
+      const result = await importDocument(msg.doc, !!msg.batch);
       figma.ui.postMessage({ type: 'done', count: result.count, failed: result.failed });
-      figma.notify('Готово: ' + result.count + ' слоёв');
+      if (!msg.batch) figma.notify('Готово: ' + result.count + ' слоёв');
     } catch (e) {
       figma.ui.postMessage({ type: 'error', message: String((e && e.message) || e) });
     }
+  } else if (msg.type === 'batch-end' && batchNodes.length) {
+    figma.currentPage.selection = batchNodes;
+    figma.viewport.scrollAndZoomIntoView(batchNodes);
+    figma.notify('Готово: экранов ' + batchNodes.length);
+    batchNodes = [];
   }
 };
 
@@ -31,7 +38,7 @@ function progress(text) {
   figma.ui.postMessage({ type: 'progress', text: text });
 }
 
-async function importDocument(doc) {
+async function importDocument(doc, batch) {
   progress('Подбираю шрифты…');
   const font = await prepareFonts(doc.root);
   progress('Добавляю картинки…');
@@ -59,8 +66,12 @@ async function importDocument(doc) {
     root.x = Math.round(right + 200);
     root.y = Math.round(top);
   }
-  page.selection = [root];
-  figma.viewport.scrollAndZoomIntoView([root]);
+  if (batch) {
+    batchNodes.push(root);
+  } else {
+    page.selection = [root];
+    figma.viewport.scrollAndZoomIntoView([root]);
+  }
   return ctx;
 }
 

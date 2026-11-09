@@ -10,7 +10,7 @@
   const q = new URLSearchParams(location.search);
   const width = +q.get('w') || 1440;
   const height = +q.get('h') || 900;
-  const opts = { width, height, autoLayout: q.get('al') !== '0', images: q.get('img') !== '0' };
+  const opts = { width, height, autoLayout: q.get('al') !== '0', images: q.get('img') !== '0', expand: q.get('expand') === '1' };
   try {
     const ui = await (await fetch('../ui.html')).text();
     // The plugin's first <script>: the page agent plus prepareHtml() and friends.

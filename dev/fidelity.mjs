@@ -8,6 +8,7 @@
 //   node dev/fidelity.mjs landing -w 390  # cases whose name contains "landing", phone width
 //   node dev/fidelity.mjs --jobs 4        # cases in parallel (default 3), each in its own tabs
 //   node dev/fidelity.mjs --timeout 300   # per-case limit in seconds (default 240)
+//   node dev/fidelity.mjs --expand        # inner scrollers grown (the diff then shows the extra height)
 //
 // Needs Google Chrome installed (uses the DevTools protocol, no npm deps).
 import http from 'node:http';
@@ -23,12 +24,14 @@ const KILL_MOTION = '*,*::before,*::after{animation-duration:0s!important;animat
 
 const argv = process.argv.slice(2);
 let width = 1440, height = 900, jobs = 3, caseTimeout = 240;
+let expand = false;
 const filters = [];
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '-w') width = +argv[++i];
   else if (argv[i] === '-h') height = +argv[++i];
   else if (argv[i] === '-j' || argv[i] === '--jobs') jobs = Math.max(1, +argv[++i] || 1);
   else if (argv[i] === '--timeout') caseTimeout = +argv[++i] || caseTimeout;
+  else if (argv[i] === '--expand') expand = true;
   else filters.push(argv[i]);
 }
 const cases = fs.readdirSync(path.join(ROOT, 'dev', 'cases'))
@@ -185,7 +188,7 @@ async function original(caseFile, tabs) {
 
 async function extract(caseFile, tabs) {
   const p = await newPage(width, height, tabs);
-  await p.goto(`${BASE}/dev/runner.html?case=${encodeURIComponent('cases/' + caseFile)}&w=${width}&h=${height}`);
+  await p.goto(`${BASE}/dev/runner.html?case=${encodeURIComponent('cases/' + caseFile)}&w=${width}&h=${height}${expand ? '&expand=1' : ''}`);
   const len = await waitFor(p, 'window.__result ? window.__result.length : 0', caseTimeout * 1000, () => tabs.size > 0);
   // Read in slices: a raw photo re-encoded at 4096px is 20MB+ of base64, more than one
   // DevTools message carries (the reply never arrives and the case looked hung).

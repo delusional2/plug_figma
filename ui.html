@@ -130,7 +130,7 @@
   <div class="row">
     <button id="open" class="secondary">Открыть файл…</button>
     <span id="filename" class="filename grow"></span>
-    <input id="file" type="file" accept=".html,.htm,text/html,.json,application/json" hidden>
+    <input id="file" type="file" accept=".html,.htm,text/html,.json,application/json" multiple hidden>
   </div>
 
   <div class="row">
@@ -147,6 +147,7 @@
 
   <label class="check"><input id="autolayout" type="checkbox" checked> Auto Layout там, где получится</label>
   <label class="check"><input id="images" type="checkbox" checked> Загружать картинки</label>
+  <label class="check"><input id="expand" type="checkbox" checked> Разворачивать прокручиваемые блоки на всю высоту</label>
 
   <div class="row">
     <button id="go" class="primary grow">Импортировать</button>
@@ -255,6 +256,7 @@ async function runExtract(opts, progress) {
     try { forceLightScheme(); } catch (err) {}
   }
   await settle();
+  const undoExpand = opts.expand ? expandScrollers() : null;
   // Scroll through the page so lazy images and "reveal on scroll" scripts fire.
   const total = docHeight();
   for (let y = 0; y < total; y += opts.height * 0.75) {
@@ -271,6 +273,7 @@ async function runExtract(opts, progress) {
     root = extract(opts);
   } finally {
     if (opts.live) cleanupLive();
+    if (opts.live && undoExpand) undoExpand();
   }
   const list = [...S.images.values()];
   if (list.length) await loadImages(list, (i, n) => progress(`Загружаю картинки ${i}/${n}…`));
@@ -288,12 +291,51 @@ async function runLive(progress) {
       height: innerHeight,
       autoLayout: true,
       images: true,
+      expand: true,
       live: true,
     }, progress || (() => {}));
   } finally {
     motion.remove();
     scrollTo(sx, sy);
   }
+}
+
+// Panes that scroll inside a fixed-height shell (admin layouts): grown to their
+// content, with the ancestors holding them back, or what's below the fold is lost.
+function expandScrollers() {
+  const undo = [];
+  const set = (el, height) => {
+    undo.push([el, el.getAttribute('style')]);
+    el.style.setProperty('min-height', Math.ceil(height) + 'px', 'important');
+    el.style.setProperty('max-height', 'none', 'important');
+  };
+  const scrolls = (el) => {
+    if (el === document.documentElement || ATOMIC_TAGS.has(el.tagName.toUpperCase()) || !el.clientHeight || el.scrollHeight <= el.clientHeight + 1) return false;
+    const cs = getComputedStyle(el);
+    return /auto|scroll/.test(cs.overflowY) && cs.position !== 'fixed' && cs.visibility === 'visible' && cs.opacity !== '0';
+  };
+  // Passes: growing an inner pane can make its outer pane scroll again.
+  for (let pass = 0; pass < 4; pass++) {
+    const list = [...document.querySelectorAll('*')].filter(scrolls);
+    if (!list.length) break;
+    for (const el of list) {
+      const full = el.scrollHeight + el.offsetHeight - el.clientHeight;
+      const bottom = el.getBoundingClientRect().top + full;
+      set(el, full);
+      for (let a = el.parentElement; a; a = a.parentElement) {
+        const r = a.getBoundingClientRect();
+        if (r.bottom >= bottom - 1) continue;
+        set(a, bottom - r.top);
+        a.style.setProperty('height', 'auto', 'important');
+      }
+    }
+  }
+  return () => {
+    for (let i = undo.length - 1; i >= 0; i--) {
+      const [el, st] = undo[i];
+      if (st === null) el.removeAttribute('style'); else el.setAttribute('style', st);
+    }
+  };
 }
 
 // Undo what materializePseudos() added to a live page.
@@ -910,8 +952,9 @@ function extract(opts) {
   }
   if (!fills.length) fills = [solid({ r: 1, g: 1, b: 1, a: 1 })];
 
-  const title = (d.title || '').trim() || 'HTML';
-  const root = { type: 'FRAME', name: `${title} · ${W}px`, x: 0, y: 0, w: W, h: H, fills, clip: true, children: paintOrder(children) };
+  const h1 = d.querySelector('h1');
+  const title = (d.title || '').trim() || (h1 ? h1.textContent.replace(/\s+/g, ' ').trim().slice(0, 40) : '') || 'Страница';
+  const root = { type: 'FRAME', name: `${title} · ${W}`, x: 0, y: 0, w: W, h: H, fills, clip: true, children: paintOrder(children) };
   setConstraints(root);
   tryAutoLayout(root, bodyCS);
   finalizeOrder(root);
@@ -1517,6 +1560,13 @@ function walkEl(el, ox, oy) {
     return [k];
   }
   const f = frameNode(el, box, visual, common, kids);
+  if (!f.children.length && drawsNothing(f)) return [];
+  if (!f.children.length && isDot(el, f)) {
+    Object.assign(f, { type: 'ELLIPSE', name: 'Точка', radii: null });
+    delete f.children;
+    delete f.clip;
+    return [f];
+  }
   if (!f.children.length && visual.radii && visual.radii.ellipse) {
     // A leaf with elliptical corners: a real ellipse or a vector outline.
     const e = visual.radii.ellipse;
@@ -1531,6 +1581,19 @@ function walkEl(el, ox, oy) {
   tryAutoLayout(f, cs, el);
   finalizeOrder(f);
   return [f];
+}
+
+// An empty box with nothing to show (clearfix, a transparent ::before with an opacity).
+function drawsNothing(f) {
+  const shown = (p) => p.visible !== false && p.opacity !== 0 && !(p.color && p.color.a === 0);
+  return !(f.fills || []).some(shown) && !f.stroke && !(f.effects || []).length;
+}
+
+// A small round ::before/::after: the marker dot of a list or a status.
+function isDot(el, f) {
+  if (!el.hasAttribute('data-h2f-pseudo') || f.w > 32 || Math.abs(f.w - f.h) > 0.6 || !f.radii) return false;
+  const e = f.radii.ellipse;
+  return ['tl', 'tr', 'br', 'bl'].every((k) => (e ? Math.min(e[k][0], e[k][1]) : f.radii[k]) >= f.w / 2 - 0.6);
 }
 
 // Content the engine doesn't paint although its own style says it's visible:
@@ -1642,27 +1705,26 @@ function fixSpread(f) {
 
 // Utility classes (Tailwind and friends) say nothing about what a layer is.
 const UTIL_CLASS = /^(?:!|-)?(?:flex|inline|block|grid|hidden|contents|table|flow-root|static|relative|absolute|fixed|sticky|isolate|container|visible|invisible|collapse|truncate|uppercase|lowercase|capitalize|italic|underline|line-through|antialiased|subpixel-antialiased|sr-only|not-sr-only|group|peer|grow|shrink|transform|transition|d|m[trblxyse]?|p[trblxyse]?|gap|space|w|h|min|max|size|text|font|leading|tracking|bg|from|via|to|border|divide|outline|ring|rounded|shadow|drop|opacity|z|top|left|right|bottom|inset|start|end|items|justify|self|place|content|order|col|row|basis|overflow|overscroll|object|aspect|translate|rotate|scale|skew|origin|duration|ease|delay|animate|cursor|select|pointer|resize|fill|stroke|backdrop|blur|brightness|line|whitespace|break|list|decoration|align|columns|float|clear|mix|filter|scroll|snap|touch|will|accent|caret|appearance|shrink-0|sm|md|lg|xl|dark|hover|focus)(?:-|$)/;
-const GENERIC_TAGS = /^(div|span|section|article|aside|header|footer|nav|main|li|a|button|label|form)$/;
+// Build-tool output (sc0, css-1x2y3z, jsx-123, styled-components hashes): just as meaningless.
+const GENERATED_NAME = /^(?:[a-z]{1,3}\d[a-z\d]*|(?:sc|css|jsx|svelte|astro|emotion|styled)-[\w-]*|_[\w-]{4,}|(?=(?:.*[A-Z]){2})[a-zA-Z]{5,7}|radix-.*)$/;
+const meaningfulName = (c) => c && !/[:\[\]\/]/.test(c) && !UTIL_CLASS.test(c) && !GENERATED_NAME.test(c);
 
 function nameFor(el) {
   const pseudo = el.getAttribute('data-h2f-pseudo');
   if (pseudo) return pseudo;
   const tag = el.tagName.toLowerCase();
-  const label = el.getAttribute('aria-label') || el.getAttribute('data-name') || el.id || el.getAttribute('title');
-  if (label) return `${tag} · ${label.trim()}`.slice(0, 60);
-  const role = el.getAttribute('role');
-  const cls = [...el.classList].find((c) => !/[:\[\]\/]/.test(c) && !UTIL_CLASS.test(c));
-  const base = `${role || tag}${cls ? '.' + cls : ''}`;
-  if (cls || !GENERIC_TAGS.test(tag) || el === S.doc.body) return base.slice(0, 60);
-  // A content hint for generic containers: their heading, or their own short text.
-  let src = /^(a|button|label|li)$/.test(tag) ? el : el.querySelector('h1,h2,h3,h4,h5,h6');
-  if (!src) {
-    const all = el.textContent || '';
-    if (all.length > 200) return base;
-    src = el;
+  const label = el.getAttribute('aria-label') || el.getAttribute('data-name') || el.getAttribute('title') || el.getAttribute('alt');
+  if (label && label.trim()) return `${tag} · ${label.trim()}`.slice(0, 60);
+  const base = el.getAttribute('role') || tag;
+  if (el !== S.doc.body) {
+    // Its heading, or its own text when there's little of it.
+    const src = /^(a|button|label|li)$/.test(tag) ? el : el.querySelector('h1,h2,h3,h4,h5,h6') || ((el.textContent || '').length <= 200 ? el : null);
+    const hint = src ? (src.innerText || src.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 32) : '';
+    if (hint) return `${base} · ${hint}`.slice(0, 60);
   }
-  const hint = (src.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 32);
-  return (hint ? `${base} · ${hint}` : base).slice(0, 60);
+  const cls = [...el.classList].find(meaningfulName);
+  if (cls) return `${base}.${cls}`.slice(0, 60);
+  return meaningfulName(el.id) ? `${base}#${el.id}`.slice(0, 60) : base;
 }
 
 // ---------- box styles ----------
@@ -4168,7 +4230,7 @@ function normalizeUrl(s) {
     u = (/^(localhost|127\.|\[::1\]|0\.0\.0\.0)/i.test(u) ? 'http://' : 'https://') + u;
   }
   if (!/^https?:/i.test(u)) return null;
-  try { return new URL(u.replace(/^(https?:\/\/)0\.0\.0\.0/i, '$1localhost')).href; } catch (e) { return null; }
+  try { return new URL(u.replace(/^(https?:\/\/)(0\.0\.0\.0|127\.\d+\.\d+\.\d+|\[::1\])/i, '$1localhost')).href; } catch (e) { return null; }
 }
 
 // ---------- JSX / TSX components (v0, Claude artifacts, shadcn) ----------
@@ -4328,10 +4390,11 @@ const $ = (id) => document.getElementById(id);
 const PRESETS = { desktop: [1440, 900], laptop: [1280, 800], tablet: [768, 1024], mobile: [390, 844] };
 let busy = false;
 let lastWarnings = [];
+let statusPrefix = ''; // "[2/5] " while a batch of files is imported
 
 function setStatus(text, kind) {
   const el = $('status');
-  el.textContent = text;
+  el.textContent = statusPrefix + text;
   el.className = kind || '';
 }
 
@@ -4351,7 +4414,7 @@ function currentSize() {
 }
 
 function settings() {
-  return { preset: $('preset').value, width: $('width').value, autoLayout: $('autolayout').checked, images: $('images').checked };
+  return { preset: $('preset').value, width: $('width').value, autoLayout: $('autolayout').checked, images: $('images').checked, expand: $('expand').checked };
 }
 
 function saveSettings() {
@@ -4362,20 +4425,45 @@ $('preset').addEventListener('change', () => {
   $('width').hidden = $('preset').value !== 'custom';
   saveSettings();
 });
-for (const id of ['width', 'autolayout', 'images']) $(id).addEventListener('change', saveSettings);
+for (const id of ['width', 'autolayout', 'images', 'expand']) $(id).addEventListener('change', saveSettings);
 
 $('open').addEventListener('click', () => $('file').click());
 $('file').addEventListener('change', () => {
-  if ($('file').files[0]) loadFile($('file').files[0]);
+  pickFiles($('file').files);
   $('file').value = '';
 });
 
 // A .json from the bookmarklet is kept aside (it can be megabytes): the textarea only says so.
 let pendingPayload = null;
+let pendingName = ''; // the opened file's name: names the frame
+let pendingFiles = null; // several files at once: imported one by one, in a row
+
+const baseName = (name) => name.replace(/\.[^.]+$/, '');
+
+function clearPending() {
+  pendingPayload = null;
+  pendingName = '';
+  pendingFiles = null;
+}
+
+function pickFiles(list) {
+  const all = [...list];
+  const files = all.filter((f) => /\.(html?|json)$/i.test(f.name) || /html|json/.test(f.type));
+  if (files.length < 2) {
+    if (files[0] || all[0]) loadFile(files[0] || all[0]);
+    return;
+  }
+  clearPending();
+  pendingFiles = files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  $('html').value = '';
+  $('url').value = '';
+  $('filename').textContent = `Файлов: ${files.length}, встанут в ряд`;
+  setStatus('');
+}
 
 async function loadFile(file) {
   const text = await file.text();
-  pendingPayload = null;
+  clearPending();
   if (/\.json$/i.test(file.name) || /^\s*\{/.test(text)) {
     const p = parsePayload(text);
     if (p) {
@@ -4388,6 +4476,7 @@ async function loadFile(file) {
     }
   }
   $('html').value = text;
+  pendingName = baseName(file.name);
   $('filename').textContent = file.name;
   setStatus('');
 }
@@ -4425,11 +4514,11 @@ document.addEventListener('drop', (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove('dragging');
-  const file = [...e.dataTransfer.files].find((f) => /\.(html?|json)$/i.test(f.name) || /html|json/.test(f.type)) || e.dataTransfer.files[0];
-  if (file) loadFile(file);
+  pickFiles(e.dataTransfer.files);
 });
 
-$('html').addEventListener('input', () => { $('filename').textContent = ''; pendingPayload = null; });
+$('html').addEventListener('input', () => { $('filename').textContent = ''; clearPending(); });
+$('url').addEventListener('input', () => { if (pendingFiles) { $('filename').textContent = ''; pendingFiles = null; } });
 $('url').addEventListener('keydown', (e) => { if (e.key === 'Enter') runImport(); });
 $('go').addEventListener('click', runImport);
 document.addEventListener('keydown', (e) => {
@@ -4450,8 +4539,13 @@ window.addEventListener('message', (e) => {
     $('width').hidden = $('preset').value !== 'custom';
     $('autolayout').checked = s.autoLayout !== false;
     $('images').checked = s.images !== false;
+    $('expand').checked = s.expand !== false;
   } else if (msg.type === 'progress') {
     setStatus(msg.text);
+  } else if (building && (msg.type === 'done' || msg.type === 'error')) {
+    const b = building;
+    building = null;
+    if (msg.type === 'done') b.resolve(msg); else b.reject(new Error(msg.message));
   } else if (msg.type === 'done') {
     lock(false);
     const extra = msg.failed ? ` (не получилось: ${msg.failed})` : '';
@@ -4488,8 +4582,56 @@ async function fetchPage(url) {
   return withBase(text, res.url || url);
 }
 
+// One page of a batch: built in Figma before the next one starts.
+let building = null;
+function buildInFigma(doc) {
+  return new Promise((resolve, reject) => {
+    building = { resolve, reject };
+    parent.postMessage({ pluginMessage: { type: 'import', doc, batch: true } }, '*');
+  });
+}
+
+async function pageDoc(html, name) {
+  const [width, height] = currentSize();
+  const prep = prepareHtml(html, { agent: true });
+  setStatus(prep.jsx ? 'Собираю React-компонент…' : prep.tailwind ? 'Рендерю страницу (подключаю Tailwind)…' : 'Рендерю страницу…');
+  const { root, images, warnings } = await renderAndExtract(prep.html, {
+    width, height, autoLayout: $('autolayout').checked, images: $('images').checked, expand: $('expand').checked,
+  });
+  lastWarnings = warnings || [];
+  return { name: name ? `${name} · ${width}` : root.name, root, images };
+}
+
+async function runBatch(files) {
+  lock(true);
+  const failed = [];
+  let layers = 0, tailwind = false;
+  for (let i = 0; i < files.length; i++) {
+    statusPrefix = `[${i + 1}/${files.length}] `;
+    try {
+      const text = await files[i].text();
+      const p = parsePayload(text);
+      const doc = p ? payloadDoc(p) : await pageDoc(text, baseName(files[i].name));
+      tailwind = tailwind || (!p && lastWarnings.includes('tailwind'));
+      setStatus('Создаю слои в Figma…');
+      layers += (await buildInFigma(doc)).count;
+    } catch (err) {
+      console.error(err);
+      failed.push(files[i].name);
+    }
+  }
+  statusPrefix = '';
+  parent.postMessage({ pluginMessage: { type: 'batch-end' } }, '*');
+  lock(false);
+  const done = files.length - failed.length;
+  if (failed.length) setStatus(`Готово ${done} из ${files.length}. Не получилось: ${failed.join(', ')}`, 'warn');
+  else if (tailwind) setStatus(`Готово. Экранов: ${done}, слоёв: ${layers}. Внимание: Tailwind CDN не загрузился, стили потеряны у части экранов.`, 'warn');
+  else setStatus(`Готово. Экранов: ${done}, слоёв: ${layers}`, 'ok');
+}
+
 async function runImport() {
   if (busy) return;
+  if (pendingFiles) { runBatch(pendingFiles); return; }
   let html = $('html').value.trim();
   // A snapshot from the bookmarklet: already measured, build it as it is.
   const payload = pendingPayload || (!$('url').value.trim() && parsePayload(html));
@@ -4520,21 +4662,15 @@ async function runImport() {
     setStatus('Сначала вставь HTML или ссылку', 'error');
     return;
   }
-  const [width, height] = currentSize();
   lock(true);
   try {
     if (url) {
       setStatus('Загружаю страницу…');
       html = await fetchPage(url);
     }
-    const prep = prepareHtml(html, { agent: true });
-    setStatus(prep.jsx ? 'Собираю React-компонент…' : prep.tailwind ? 'Рендерю страницу (подключаю Tailwind)…' : 'Рендерю страницу…');
-    const { root, images, warnings } = await renderAndExtract(prep.html, {
-      width, height, autoLayout: $('autolayout').checked, images: $('images').checked,
-    });
-    lastWarnings = warnings || [];
+    const doc = await pageDoc(html, url ? '' : pendingName);
     setStatus('Создаю слои в Figma…');
-    parent.postMessage({ pluginMessage: { type: 'import', doc: { name: root.name, root, images } } }, '*');
+    parent.postMessage({ pluginMessage: { type: 'import', doc } }, '*');
   } catch (err) {
     console.error(err);
     lock(false);
